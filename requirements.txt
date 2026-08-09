@@ -1,0 +1,14 @@
+# Core (Wave 0)
+PySide6>=6.7
+pydantic>=2.7
+pydantic-settings>=2.3
+
+# Data layer (Wave 1)
+polars>=1.0
+numpy>=2.0
+pandas>=2.2
+pyarrow>=16.0
+
+# Dev / test
+pytest>=8.0
+ruff>=0.5

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Env / secrets
+.env
+
+# Runtime data (user-local, created on first launch)
+data/
+sessions/
+drawings/
+logs/
+
+# Editor / OS
+.vscode/
+.idea/
+*.log
+Thumbs.db
+.DS_Store

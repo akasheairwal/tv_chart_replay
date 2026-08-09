@@ -1,0 +1,22 @@
+{
+  "name": "trading-chart-replayer-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TypeScript frontend (Lightweight Charts + custom drawing engine) for the trading chart replayer",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lightweight-charts": "^5.0.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "vitest": "^2.1.1"
+  }
+}

@@ -1,0 +1,135 @@
+:root {
+  color-scheme: dark;
+  --bg: #101014;
+  --bg-panel: #1a1a21;
+  --bg-hover: #24242e;
+  --border: #2c2c38;
+  --fg: #d7d7de;
+  --fg-muted: #8a8a96;
+  --accent: #2962ff;
+  --ok: #26a69a;
+  --err: #ef5350;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+#app {
+  display: grid;
+  grid-template-rows: 40px 1fr 30px;
+  height: 100vh;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  grid-row: 1;
+}
+
+.app-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-pill {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.status-pill.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.status-pill.err {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+#main {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  grid-row: 2;
+  min-height: 0;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.panel-title {
+  padding: 8px 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+.panel-empty {
+  padding: 10px;
+  color: var(--fg-muted);
+}
+
+#chart-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toolbar {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+#chart-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+#status-bar {
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+}
