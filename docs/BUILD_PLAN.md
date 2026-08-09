@@ -58,8 +58,8 @@ W0 (bridge contract) ─► W1 (data pipeline) ─► W2 (chart + coord spike)
 - [x] 0.3 PySide6 shell: `QWebEngineView` main window, dev/prod URL resolution
 - [x] 0.4 TypeScript toolchain + app shell (index.html, style, chart placeholder)
 - [x] 0.5 Bridge bootstrap: QWebChannel handler (explicit slots) + TS client; ping/pong + version handshake + events
-- [ ] 0.6 Integration smoke tests: QWebChannel round trip over a real page; full-bundle round trip
-- [ ] 0.7 Initial commit (post-verification)
+- [x] 0.6 Integration smoke tests: QWebChannel round trip over a real page; full-bundle round trip
+- [x] 0.7 Initial commit (post-verification)
 - **Exit:** "Empty interactive chart application" with proven bidirectional bridge.
 
 ### Wave 1 — Data Acquisition Pipeline  (doc Phase 2; size L)
@@ -163,5 +163,5 @@ Workspace/packaging (W8). The doc MVP §82 completes at W7.
 
 | Wave | Status |
 |------|--------|
-| W0 Foundation & Bridge Shell | In progress |
+| W0 Foundation & Bridge Shell | **Complete** (pytest 13/13, vitest 3/3, tsc + vite build green) |
 | W1–W9 | Not started |
