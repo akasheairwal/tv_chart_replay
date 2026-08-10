@@ -111,13 +111,33 @@ export class App {
           if (selected) {
             this.drawingStyleEditor.show(selected);
           } else {
-            this.drawingStyleEditor.hide();
+            const engine = this.chart.getDrawingEngine();
+            const currentTool = engine?.getCurrentTool();
+            if (currentTool && currentTool !== 'cursor') {
+              this.drawingStyleEditor.showForTool(currentTool);
+            } else {
+              this.drawingStyleEditor.hide();
+            }
           }
         }
       },
       (tool) => {
+        const dTool = tool as import('./drawings/drawing-types').DrawingType;
         if (this.drawingToolbar) {
-          this.drawingToolbar.syncTool(tool as import('./drawings/drawing-types').DrawingType);
+          this.drawingToolbar.syncTool(dTool);
+        }
+        if (this.drawingStyleEditor) {
+          if (dTool && dTool !== 'cursor') {
+            this.drawingStyleEditor.showForTool(dTool);
+          } else {
+            const engine = this.chart.getDrawingEngine();
+            const selected = engine?.getSelectedDrawing();
+            if (selected) {
+              this.drawingStyleEditor.show(selected);
+            } else {
+              this.drawingStyleEditor.hide();
+            }
+          }
         }
       },
       (posId, price) => void this.handleClosePosition(posId, price),
@@ -199,7 +219,7 @@ export class App {
     const drawingEngine = this.chart.getDrawingEngine();
     if (drawingEngine) {
       this.drawingStyleEditor = new DrawingStyleEditor(
-        requireElement('#drawing-style-bar-container'),
+        requireElement('#chart-area'),
         drawingEngine,
       );
       this.drawingStyleEditor.onCreateOrder = (params) => {
@@ -835,7 +855,7 @@ export class App {
   private async deleteDrawing(id: string): Promise<void> {
     if (!this.bridge) return;
     try {
-      await this.bridge.callJson('deleteDrawing', JSON.stringify(id));
+      await this.bridge.callJson('deleteDrawing', id);
     } catch {
       // Ignore delete failures
     }

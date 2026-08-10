@@ -811,21 +811,23 @@ body {
    =================================================================== */
 
 .drawing-style-editor.tv-floating-style {
-  position: absolute;
-  top: 14px;
+  position: fixed;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(30, 34, 45, 0.95);
-  backdrop-filter: blur(8px);
+  background: rgba(30, 34, 45, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--tv-border);
   border-radius: 20px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-  padding: 4px 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+  padding: 5px 12px;
   display: flex;
   align-items: center;
   gap: 6px;
-  z-index: 50;
+  z-index: 9999;
   user-select: none;
+  pointer-events: all;
 }
 
 .style-editor-badge {

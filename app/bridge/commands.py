@@ -326,8 +326,8 @@ class BridgeCommandHandler(QObject):
     @Slot(str, result=str)
     def deleteDrawing(self, id_json: str) -> str:  # camelCase: bridge contract name
         def action() -> Any:
-            drawing_id = id_json.strip('"')
-            deleted = self._services.drawing_registry.delete_drawing(drawing_id)
+            drawing_id = json.loads(id_json) if id_json.startswith('"') else id_json
+            deleted = self._services.drawing_registry.delete_drawing(str(drawing_id))
             if deleted:
                 self.emit("drawing.deleted", {"id": drawing_id})
             return {"deleted": deleted, "id": drawing_id}
