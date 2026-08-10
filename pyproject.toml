@@ -20,6 +20,8 @@ data = [
     "numpy>=2.0",
     "pandas>=2.2",
     "pyarrow>=16.0",
+    "yfinance>=0.2.40",
+    "requests>=2.31",
 ]
 dev = [
     "pytest>=8.0",

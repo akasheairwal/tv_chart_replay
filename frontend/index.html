@@ -8,23 +8,169 @@
          Outside the desktop shell (plain browser / tests) this tag fails to
          load; python-bridge.ts degrades gracefully to browser mode. -->
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="app">
-      <header class="titlebar">
-        <span class="app-title">Trading Chart Replayer</span>
-        <span id="bridge-status" class="status-pill">connecting…</span>
+      <!-- Exness / TradingView Top Navigation Header -->
+      <header class="titlebar tv-header">
+        <div class="header-left">
+          <div class="app-brand">
+            <svg class="brand-logo" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#2962ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+              <polyline points="16 7 22 7 22 13"></polyline>
+            </svg>
+            <span class="app-title">Trading Replayer</span>
+          </div>
+
+          <div class="header-sym-pill" id="header-sym-pill">
+            <span class="sym-name" id="header-sym-name">EURUSD</span>
+            <span class="sym-tf" id="header-sym-tf">1H</span>
+            <span class="sym-price" id="header-price-badge">--</span>
+          </div>
+
+          <div class="timeframe-group">
+            <select id="timeframe-select" class="tf-select" title="Timeframe">
+              <option value="1m">1m</option>
+              <option value="5m">5m</option>
+              <option value="15m">15m</option>
+              <option value="1H" selected>1H</option>
+              <option value="4H">4H</option>
+              <option value="1D">1D</option>
+              <option value="1W">1W</option>
+              <option value="1M">1M</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="header-center">
+          <div class="toolbar-actions-group">
+            <button id="request-data" class="header-btn" type="button" title="Fetch historical data for selected symbol">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Fetch Data</span>
+            </button>
+            <button id="indicators-btn" class="header-btn" type="button" title="Open Technical Indicators dialog">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-6 6"/><circle cx="18" cy="9" r="2" fill="currentColor"/></svg>
+              <span>Indicators</span>
+            </button>
+            <button id="sessions-btn" class="header-btn" type="button" title="Open / manage sessions">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span>Sessions</span>
+            </button>
+            <button id="save-session-btn" class="header-btn" type="button" title="Quick-save session (Ctrl+S)">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              <span>Save</span>
+            </button>
+          </div>
+
+          <div class="layout-switcher-group">
+            <button id="layout-1-btn" class="layout-btn active" type="button" title="Single chart layout">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            </button>
+            <button id="layout-2-btn" class="layout-btn" type="button" title="Dual chart layout (2x1)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8.5" height="18" rx="1"/><rect x="12.5" y="3" width="8.5" height="18" rx="1"/></svg>
+            </button>
+            <button id="layout-4-btn" class="layout-btn" type="button" title="Quad chart layout (2x2)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8.5" height="8.5" rx="1"/><rect x="12.5" y="3" width="8.5" height="8.5" rx="1"/><rect x="3" y="12.5" width="8.5" height="8.5" rx="1"/><rect x="12.5" y="12.5" width="8.5" height="8.5" rx="1"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <button id="watchlist-toggle-btn" class="header-btn secondary-btn active" type="button" title="Toggle Watchlist Sidebar">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+            <span>Watchlist</span>
+          </button>
+          <button id="trading-btn" class="header-btn trade-action-btn" type="button" title="Toggle Left Trade Panel">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span>Trade Panel</span>
+          </button>
+          <button id="logs-btn" class="header-btn secondary-btn" type="button" title="Open System Log Viewer">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <span>Logs</span>
+          </button>
+          <div class="status-pill-wrap">
+            <span id="bridge-status" class="status-pill"><span class="status-dot"></span><span class="status-label">connecting…</span></span>
+          </div>
+        </div>
       </header>
+
+      <!-- Main Workspace -->
       <main id="main">
-        <aside id="watchlist-panel" class="panel">
-          <div class="panel-title">WATCHLIST</div>
-          <div class="panel-empty">Wave 8</div>
+        <!-- Watchlist Sidebar (Collapsible) -->
+        <aside id="watchlist-panel" class="panel exness-watchlist">
+          <div class="panel-section-header with-collapse">
+            <span class="panel-title">WATCHLIST</span>
+            <button id="watchlist-collapse-btn" class="panel-collapse-btn" type="button" title="Collapse Watchlist">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="11 17 6 12 11 7"></polyline>
+                <polyline points="18 17 13 12 18 7"></polyline>
+              </svg>
+            </button>
+          </div>
+          <div id="watchlist-container"></div>
+
+          <div class="panel-section-header search-section">
+            <span class="panel-title">SEARCH INSTRUMENTS</span>
+          </div>
+          <div class="search-input-wrap">
+            <svg class="search-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input
+              id="symbol-search"
+              type="text"
+              placeholder="Search symbol (e.g. BTC, Gold)…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <ul id="symbol-results" class="symbol-list"></ul>
+
+          <div class="panel-section-header">
+            <span class="panel-title">DATA FEED STATUS</span>
+          </div>
+          <div id="data-status" class="data-status">No dataset selected</div>
         </aside>
+
+        <!-- Central Charting & Trading Area -->
         <section id="chart-area">
-          <div id="chart-toolbar" class="toolbar"></div>
-          <div id="chart-container"></div>
+          <!-- Floating edge expand handles for collapsed panels -->
+          <button id="watchlist-expand-handle" class="panel-edge-handle left-edge-handle" type="button" title="Expand Watchlist (W)">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </button>
+          <button id="trade-panel-expand-handle" class="panel-edge-handle right-edge-handle" type="button" title="Expand Trade Panel (T)">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+          </button>
+
+          <div id="chart-layout-body">
+            <!-- Left TradingView Drawing Rail -->
+            <div id="drawing-toolbar-container"></div>
+
+            <!-- Chart Canvas Container -->
+            <div id="chart-container">
+              <div id="drawing-style-bar-container"></div>
+            </div>
+          </div>
+
+          <!-- Bottom Replay Control Bar (TradingView style) -->
+          <div id="replay-bar-container"></div>
+
+          <!-- Bottom Trading Drawer (Exness WebTerminal style) -->
+          <div id="trading-drawer-container"></div>
         </section>
+
+        <!-- Right Side Trade Panel (Collapsible) -->
+        <aside id="trade-panel" class="panel exness-trade-panel"></aside>
       </main>
+
       <footer id="status-bar">ready</footer>
     </div>
     <script type="module" src="/src/main.ts"></script>

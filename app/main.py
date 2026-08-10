@@ -9,11 +9,18 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
+
+# Ensure workspace root is in sys.path when invoked directly via python app/main.py
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 from PySide6.QtCore import QUrl
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QMainWindow
 
+from app.application import build_context
 from app.bridge.channel import setup_bridge
 from app.bridge.commands import BridgeCommandHandler
 from app.config.paths import get_paths
@@ -60,7 +67,16 @@ class MainWindow(QMainWindow):
             self.web_view.page(), app_version=settings.app_version
         )
 
+        # Wave-1 data services: registry/store/provider/manager + event relay.
+        self.context = build_context(settings)
+        self.bridge_handler.attach_services(self.context)
+        self.context.event_relay.eventEmitted.connect(self.bridge_handler.eventEmitted)
+
         self.web_view.load(self._resolve_start_url())
+
+    def closeEvent(self, event) -> None:
+        self.context.close()
+        super().closeEvent(event)
 
     def _resolve_start_url(self) -> QUrl:
         if self.dev_mode:

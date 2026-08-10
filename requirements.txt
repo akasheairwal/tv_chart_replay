@@ -8,6 +8,9 @@ polars>=1.0
 numpy>=2.0
 pandas>=2.2
 pyarrow>=16.0
+yfinance>=0.2.40
+dukascopy-python>=4.0.1
+requests>=2.31
 
 # Dev / test
 pytest>=8.0

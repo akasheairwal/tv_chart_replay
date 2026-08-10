@@ -8,9 +8,11 @@ Standalone historical trading chart replay terminal (TradingView-style).
 - **TypeScript renders**: Lightweight Charts + a custom drawing engine.
 - **QWebChannel bridge**: local Python <-> JS communication. No HTTP server.
 
-Full architecture: `trading_replayer_revised_complete_architecture.md`
-Build plan (waves & phases): `docs/BUILD_PLAN.md`
-Bridge contract: `docs/bridge-contract.md`
+- **First-time setup guide**: [`setup.md`](file:///d:/code/tv_chart_replay/setup.md)
+- **Daily startup & workflow guide**: [`daily_startup.md`](file:///d:/code/tv_chart_replay/daily_startup.md)
+- Full architecture: `trading_replayer_revised_complete_architecture.md`
+- Build plan (waves & phases): `docs/BUILD_PLAN.md`
+- Bridge contract: `docs/bridge-contract.md`
 
 ## Status
 

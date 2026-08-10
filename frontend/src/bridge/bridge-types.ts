@@ -20,3 +20,13 @@ export interface BridgeConnectionInfo {
   version?: string;
   reason?: string;
 }
+
+/** Watchlist item from Python (symbol + display info). */
+export interface WatchlistItemBridge {
+  symbol: string;
+  display_name: string;
+  asset_class: string;
+  exchange: string;
+  timezone: string;
+  provider_candidates: string[];
+}

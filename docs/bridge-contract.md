@@ -26,11 +26,20 @@ Exposed slot names use `camelCase` (matches the doc's bridge contract, §62).
 | `searchSymbols(query)` | `str` | `Symbol[]` | 1 |
 | `requestDataset(request)` | `DatasetRequest` | `DatasetInfo` | 1 |
 | `loadHistory(request)` | `HistoryRequest` | `Candle[]` (compact arrays) | 1 |
-| `createReplay(request)` | `ReplayRequest` | `ReplayState` | 3 |
-| `playReplay()` / `pauseReplay()` / `replayNext()` / `replayPrevious()` / `jumpTo()` | — / — / — / — / `idx` | `void` / `Candle` | 3 |
+| `createReplay(request)` | `ReplayRequest` | `ReplayInitData` | 3 |
+| `createRandomReplay(request)` | `RandomReplayRequest` | `ReplayInitData` | 3 |
+| `playReplay()` | — | `ReplayState` | 3 |
+| `pauseReplay()` | — | `ReplayState` | 3 |
+| `replayNext(step)` | `str` | `{ state, candles }` | 3 |
+| `replayPrevious(step)` | `str` | `{ state, candles }` | 3 |
+| `replayJumpTo(target)` | `str` | `{ state, candles }` | 3 |
+| `replayReset()` | — | `{ state, candles }` | 3 |
+| `setReplaySpeed(speed)` | `str` | `ReplayState` | 3 |
+| `getIndicatorCatalog()` | — | `IndicatorMetadata[]` | 4 |
+| `calculateIndicator(request)` | `IndicatorRequest` | `IndicatorCalculationResult` | 4 |
 | `saveSession(session)` / `loadSession(id)` | `Session` / `str` | `void` / `Session` | 7 |
 
-*(Indicators, drawings and data-status commands land with their waves.)*
+*(Drawings and session commands land with their waves.)*
 
 ## Events (Python → TypeScript)
 

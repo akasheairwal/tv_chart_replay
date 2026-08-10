@@ -24,7 +24,8 @@ async function boot(): Promise<void> {
   }
 
   const app = new App(bridge.connected ? bridge : null);
-  app.start();
+  (window as any).__app = app;
+  await app.start();
 }
 
 void boot();

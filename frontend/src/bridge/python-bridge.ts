@@ -11,7 +11,7 @@
  * resolves to `false` and every `call()` rejects.
  */
 
-import type { BridgeConnectionInfo, EventListener } from './bridge-types';
+import type { BridgeConnectionInfo, EventListener, WatchlistItemBridge } from './bridge-types';
 
 const QWEBCHANNEL_SCRIPT_URL = 'qrc:///qtwebchannel/qwebchannel.js';
 
@@ -136,6 +136,18 @@ export class PythonBridge {
     });
   }
 
+  /** Invoke a JSON-argument command and deserialize its result. */
+  async callJson<T = unknown>(method: string, payload: unknown): Promise<T> {
+    const raw = await this.call<string>(method, JSON.stringify(payload));
+    let parsed: unknown = raw;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      /* raw string passthrough */
+    }
+    return parsed as T;
+  }
+
   /** Subscribe to a structured Python event; returns an unsubscribe fn. */
   onEvent(event: string, listener: EventListener): () => void {
     let set = this.listeners.get(event);
@@ -153,6 +165,30 @@ export class PythonBridge {
     return connected
       ? { connected: true, version: this.version }
       : { connected: false, reason: 'Qt transport unavailable (browser mode)' };
+  }
+
+  // -- Watchlist (Wave 8) --------------------------------------------
+
+  /** Load persisted watchlist from Python. */
+  async getWatchlist(): Promise<WatchlistItemBridge[]> {
+    const raw = await this.call<string>('getWatchlist');
+    const res = JSON.parse(raw) as { ok: boolean; data?: WatchlistItemBridge[]; error?: string };
+    if (res.ok && res.data) return res.data;
+    return [];
+  }
+
+  /** Toggle a symbol in the watchlist (favorites). */
+  async toggleWatchlist(symbol: string): Promise<{ symbol: string; is_favorite: boolean } | null> {
+    const raw = await this.call<string>('toggleWatchlist', JSON.stringify(symbol));
+    const res = JSON.parse(raw) as { ok: boolean; data?: { symbol: string; is_favorite: boolean }; error?: string };
+    if (res.ok && res.data) return res.data;
+    return null;
+  }
+
+  /** Replace the entire watchlist (bulk update). */
+  async setWatchlist(symbols: string[]): Promise<number> {
+    const raw = await this.callJson<{ ok?: boolean; data?: { updated: number }; updated?: number }>('setWatchlist', { symbols });
+    return raw?.data?.updated ?? raw?.updated ?? 0;
   }
 
   private dispatchEvent(event: string, payload: unknown): void {
