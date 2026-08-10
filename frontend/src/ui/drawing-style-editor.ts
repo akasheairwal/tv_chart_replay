@@ -1,5 +1,6 @@
 import type { DrawingEngine } from '../drawings/drawing-engine';
 import type { DrawingDefinition, DrawingStyle } from '../drawings/drawing-types';
+import { calculatePositionMetrics } from '../drawings/drawing-math';
 import { getIcon } from './icons';
 
 const COLOR_PRESETS = [
@@ -14,6 +15,13 @@ const COLOR_PRESETS = [
 export class DrawingStyleEditor {
   private el: HTMLElement;
   private currentDrawing: DrawingDefinition | null = null;
+  public onCreateOrder?: (params: {
+    side: 'BUY' | 'SELL';
+    entryPrice: number;
+    slPrice: number;
+    tpPrice: number;
+    lotSize: number;
+  }) => void;
 
   constructor(
     private readonly container: HTMLElement,
@@ -34,6 +42,11 @@ export class DrawingStyleEditor {
   hide(): void {
     this.currentDrawing = null;
     this.el.style.display = 'none';
+  }
+
+  openSettingsDialog(drawing: DrawingDefinition): void {
+    this.currentDrawing = drawing;
+    this.renderSettingsModal(drawing);
   }
 
   private render(): void {
@@ -115,25 +128,41 @@ export class DrawingStyleEditor {
     }
     this.el.appendChild(styleGroup);
 
-    // 4. Long / Short position lot size adjustment
+    // 4. Special Position Controls for Long / Short position
     if (d.type === 'long_position' || d.type === 'short_position') {
       this.addSep();
-      const lotWrap = document.createElement('div');
-      lotWrap.className = 'style-input-wrap';
-      lotWrap.innerHTML = `<span class="style-input-label">Lots:</span>`;
-      const lotInput = document.createElement('input');
-      lotInput.type = 'number';
-      lotInput.step = '0.1';
-      lotInput.min = '0.01';
-      lotInput.className = 'style-num-input';
-      lotInput.value = (d.style.lotSize || 1.0).toString();
-      lotInput.title = 'Lot Size for dollar profit/loss calculations';
-      lotInput.addEventListener('input', () => {
-        const val = parseFloat(lotInput.value) || 1.0;
-        this.updateStyle({ lotSize: val });
+
+      // Quick Order Button
+      const orderBtn = document.createElement('button');
+      orderBtn.className = 'style-action-btn trade-btn';
+      orderBtn.innerHTML = `⚡ Order`;
+      orderBtn.title = 'Create Order in Trade Panel using tool SL/TP/Lots';
+      orderBtn.addEventListener('click', () => {
+        this.executeTradeFromDrawing(d);
       });
-      lotWrap.appendChild(lotInput);
-      this.el.appendChild(lotWrap);
+      this.el.appendChild(orderBtn);
+
+      // Settings Modal Button
+      const settingsBtn = document.createElement('button');
+      settingsBtn.className = 'style-action-btn settings-btn';
+      settingsBtn.innerHTML = `⚙️`;
+      settingsBtn.title = 'Position Settings & Risk Inputs';
+      settingsBtn.addEventListener('click', () => {
+        this.renderSettingsModal(d);
+      });
+      this.el.appendChild(settingsBtn);
+
+      // Compact Stats Toggle
+      const compactBtn = document.createElement('button');
+      compactBtn.className = `style-action-btn ${d.style.compactStats ? 'active' : ''}`;
+      compactBtn.innerHTML = `📊`;
+      compactBtn.title = 'Toggle Compact Statistics Badge';
+      compactBtn.addEventListener('click', () => {
+        const compactStats = !d.style.compactStats;
+        this.updateStyle({ compactStats });
+        this.render();
+      });
+      this.el.appendChild(compactBtn);
     }
 
     // 5. Text Input (if drawing has text/callout)
@@ -202,6 +231,246 @@ export class DrawingStyleEditor {
     actionsGroup.appendChild(delBtn);
 
     this.el.appendChild(actionsGroup);
+  }
+
+  private executeTradeFromDrawing(d: DrawingDefinition): void {
+    if (!this.onCreateOrder) return;
+    const metrics = calculatePositionMetrics(d.type as 'long_position' | 'short_position', d.points, d.style);
+    this.onCreateOrder({
+      side: metrics.isLong ? 'BUY' : 'SELL',
+      entryPrice: metrics.entryPrice,
+      slPrice: metrics.slPrice,
+      tpPrice: metrics.tpPrice,
+      lotSize: metrics.lotSize,
+    });
+  }
+
+  private renderSettingsModal(d: DrawingDefinition): void {
+    const existing = document.getElementById('pos-settings-modal-overlay');
+    if (existing) existing.remove();
+
+    const isPosition = d.type === 'long_position' || d.type === 'short_position';
+    const isLong = d.type === 'long_position';
+    const metrics = isPosition
+      ? calculatePositionMetrics(d.type as any, d.points, d.style)
+      : null;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pos-settings-modal-overlay';
+    overlay.className = 'tv-modal-overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'tv-modal-container pos-settings-dialog';
+
+    let activeTab: 'inputs' | 'style' = 'inputs';
+
+    const renderModalContent = () => {
+      dialog.innerHTML = `
+        <div class="tv-modal-header">
+          <div class="tv-modal-title">
+            <span class="pos-badge ${isLong ? 'long' : 'short'}">${isLong ? '🟢 LONG' : '🔴 SHORT'} POSITION SETTINGS</span>
+            <span class="pos-sym-subtitle">${d.symbol} · ${d.timeframe}</span>
+          </div>
+          <button class="tv-modal-close" id="pos-modal-close">✕</button>
+        </div>
+
+        <div class="tv-modal-tabs">
+          <button class="tv-modal-tab ${activeTab === 'inputs' ? 'active' : ''}" id="tab-btn-inputs">Inputs</button>
+          <button class="tv-modal-tab ${activeTab === 'style' ? 'active' : ''}" id="tab-btn-style">Style</button>
+        </div>
+
+        <div class="tv-modal-body">
+          ${
+            activeTab === 'inputs' && metrics
+              ? `
+            <div class="pos-input-grid">
+              <div class="pos-field-group">
+                <label>Account Size ($):</label>
+                <input type="number" id="inp-acc-size" value="${d.style.accountSize || 10000}" step="500" min="100">
+              </div>
+
+              <div class="pos-field-group">
+                <label>Risk Mode:</label>
+                <select id="inp-risk-mode">
+                  <option value="PERCENT" ${(d.style.riskMode || 'PERCENT') === 'PERCENT' ? 'selected' : ''}>% of Account</option>
+                  <option value="CASH" ${d.style.riskMode === 'CASH' ? 'selected' : ''}>$ Cash Amount</option>
+                </select>
+              </div>
+
+              <div class="pos-field-group">
+                <label id="inp-risk-val-label">${d.style.riskMode === 'CASH' ? 'Risk Amount ($):' : 'Risk Percentage (%):'}</label>
+                <input type="number" id="inp-risk-val" value="${d.style.riskMode === 'CASH' ? d.style.riskAmount || 100 : d.style.riskPercent || 1.0}" step="0.1" min="0.01">
+              </div>
+
+              <div class="pos-field-group">
+                <label>Entry Price:</label>
+                <input type="number" id="inp-entry-price" value="${d.points[0].price}" step="0.0001">
+              </div>
+
+              <div class="pos-field-group">
+                <label>Take Profit Target:</label>
+                <input type="number" id="inp-tp-price" value="${metrics.tpPrice}" step="0.0001">
+              </div>
+
+              <div class="pos-field-group">
+                <label>Stop Loss Target:</label>
+                <input type="number" id="inp-sl-price" value="${metrics.slPrice}" step="0.0001">
+              </div>
+            </div>
+
+            <div class="pos-checkbox-group">
+              <label><input type="checkbox" id="inp-compact-stats" ${d.style.compactStats ? 'checked' : ''}> Compact Statistics View</label>
+            </div>
+
+            <div class="pos-summary-card">
+              <div class="pos-card-row">
+                <span>Calculated Lot Size:</span>
+                <strong id="card-lots">${metrics.lotSize.toFixed(2)} Lots</strong>
+              </div>
+              <div class="pos-card-row">
+                <span>Risk / Reward Ratio:</span>
+                <strong id="card-rr">1 : ${metrics.rrRatio}</strong>
+              </div>
+              <div class="pos-card-row">
+                <span>Max Risk:</span>
+                <span class="text-red" id="card-risk">-$${metrics.lossDollar.toFixed(2)} (-${metrics.slPips.toFixed(1)} pips)</span>
+              </div>
+              <div class="pos-card-row">
+                <span>Estimated Profit:</span>
+                <span class="text-green" id="card-profit">+$${metrics.profitDollar.toFixed(2)} (+${metrics.tpPips.toFixed(1)} pips)</span>
+              </div>
+            </div>
+          `
+              : `
+            <div class="pos-input-grid">
+              <div class="pos-field-group">
+                <label>Target Zone Color:</label>
+                <input type="color" id="inp-target-color" value="${d.style.targetColor || '#089981'}">
+              </div>
+              <div class="pos-field-group">
+                <label>Stop Zone Color:</label>
+                <input type="color" id="inp-stop-color" value="${d.style.stopColor || '#f23645'}">
+              </div>
+              <div class="pos-field-group">
+                <label>Entry Line Color:</label>
+                <input type="color" id="inp-entry-color" value="${d.style.color || '#2962ff'}">
+              </div>
+              <div class="pos-field-group">
+                <label>Line Width:</label>
+                <select id="inp-line-width">
+                  <option value="1" ${d.style.width === 1 ? 'selected' : ''}>1px</option>
+                  <option value="2" ${d.style.width === 2 ? 'selected' : ''}>2px</option>
+                  <option value="3" ${d.style.width === 3 ? 'selected' : ''}>3px</option>
+                </select>
+              </div>
+            </div>
+          `
+          }
+        </div>
+
+        <div class="tv-modal-footer">
+          ${
+            isPosition
+              ? `<button class="tv-modal-btn trade" id="pos-modal-trade">⚡ Create Order</button>`
+              : ''
+          }
+          <div class="tv-modal-footer-right">
+            <button class="tv-modal-btn cancel" id="pos-modal-cancel">Cancel</button>
+            <button class="tv-modal-btn save" id="pos-modal-save">Save Settings</button>
+          </div>
+        </div>
+      `;
+
+      // Event listeners for tabs
+      dialog.querySelector('#tab-btn-inputs')?.addEventListener('click', () => {
+        activeTab = 'inputs';
+        renderModalContent();
+      });
+      dialog.querySelector('#tab-btn-style')?.addEventListener('click', () => {
+        activeTab = 'style';
+        renderModalContent();
+      });
+
+      // Close handlers
+      dialog.querySelector('#pos-modal-close')?.addEventListener('click', () => overlay.remove());
+      dialog.querySelector('#pos-modal-cancel')?.addEventListener('click', () => overlay.remove());
+
+      // Trade handler
+      dialog.querySelector('#pos-modal-trade')?.addEventListener('click', () => {
+        overlay.remove();
+        this.executeTradeFromDrawing(d);
+      });
+
+      // Risk mode toggle update
+      const modeSelect = dialog.querySelector<HTMLSelectElement>('#inp-risk-mode');
+      const valLabel = dialog.querySelector('#inp-risk-val-label');
+      if (modeSelect && valLabel) {
+        modeSelect.addEventListener('change', () => {
+          valLabel.textContent =
+            modeSelect.value === 'CASH' ? 'Risk Amount ($):' : 'Risk Percentage (%):';
+        });
+      }
+
+      // Save Handler
+      dialog.querySelector('#pos-modal-save')?.addEventListener('click', () => {
+        if (activeTab === 'inputs' && isPosition) {
+          const accSize = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-acc-size')?.value || '10000');
+          const riskMode = (dialog.querySelector<HTMLSelectElement>('#inp-risk-mode')?.value || 'PERCENT') as 'PERCENT' | 'CASH';
+          const riskVal = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-risk-val')?.value || '1.0');
+          const entryPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-entry-price')?.value || d.points[0].price.toString());
+          const tpPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-tp-price')?.value || d.points[1].price.toString());
+          const slPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-sl-price')?.value || d.points[2].price.toString());
+          const compact = dialog.querySelector<HTMLInputElement>('#inp-compact-stats')?.checked ?? false;
+
+          let finalTpPx = tpPx;
+          let finalSlPx = slPx;
+          const minGap = (entryPx > 1000 ? 1.0 : entryPx > 50 ? 0.01 : 0.0001) * 0.5;
+
+          if (isLong) {
+            finalTpPx = Math.max(entryPx + minGap, tpPx);
+            finalSlPx = Math.min(entryPx - minGap, slPx);
+          } else {
+            finalTpPx = Math.min(entryPx - minGap, tpPx);
+            finalSlPx = Math.max(entryPx + minGap, slPx);
+          }
+
+          d.points[0].price = entryPx;
+          if (!d.points[1]) d.points[1] = { ...d.points[0] };
+          d.points[1].price = finalTpPx;
+          if (!d.points[2]) d.points[2] = { ...d.points[0] };
+          d.points[2].price = finalSlPx;
+
+          const styleUpdates: Partial<DrawingStyle> = {
+            accountSize: accSize,
+            riskMode: riskMode,
+            riskPercent: riskMode === 'PERCENT' ? riskVal : undefined,
+            riskAmount: riskMode === 'CASH' ? riskVal : undefined,
+            compactStats: compact,
+          };
+
+          this.updateStyle(styleUpdates);
+        } else {
+          const targetColor = dialog.querySelector<HTMLInputElement>('#inp-target-color')?.value;
+          const stopColor = dialog.querySelector<HTMLInputElement>('#inp-stop-color')?.value;
+          const entryColor = dialog.querySelector<HTMLInputElement>('#inp-entry-color')?.value;
+          const lineWidth = parseInt(dialog.querySelector<HTMLSelectElement>('#inp-line-width')?.value || '2', 10);
+
+          this.updateStyle({
+            targetColor,
+            stopColor,
+            color: entryColor,
+            width: lineWidth,
+          });
+        }
+
+        this.engine.redraw();
+        overlay.remove();
+      });
+    };
+
+    renderModalContent();
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
   }
 
   private updateStyle(updates: Partial<DrawingStyle>): void {

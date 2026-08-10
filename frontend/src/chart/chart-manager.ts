@@ -12,7 +12,7 @@ import {
 import { parseCompactHistory, type CompactCandleRow } from './candle-series';
 import { DrawingEngine } from '../drawings/drawing-engine';
 import type { DrawingDefinition } from '../drawings/drawing-types';
-import type { PositionDefinition } from '../trading/trading-types';
+import type { SlTpModificationRequest } from '../ui/sl-tp-confirm-dialog';
 
 export function detectPricePrecision(samplePrice: number, symbol = ''): {
   precision: number;
@@ -61,13 +61,14 @@ export class ChartManager {
     private readonly onDrawingSelect?: (d: DrawingDefinition | null) => void,
     private readonly onToolChange?: (tool: string) => void,
     private readonly onClosePosition?: (positionId: string, currentPrice: number) => void,
+    private readonly onModifySlTpRequest?: (req: SlTpModificationRequest) => void,
   ) {}
 
   getDrawingEngine(): DrawingEngine | null {
     return this.drawingEngine;
   }
 
-  setPositions(positions: PositionDefinition[]): void {
+  setPositions(positions: import('../trading/trading-types').PositionDefinition[]): void {
     if (this.drawingEngine) {
       this.drawingEngine.setPositions(positions);
     }
@@ -175,6 +176,7 @@ export class ChartManager {
       this.onDrawingSelect,
       this.onToolChange,
       this.onClosePosition,
+      this.onModifySlTpRequest,
     );
 
     // Setup responsive ResizeObserver

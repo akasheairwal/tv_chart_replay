@@ -83,3 +83,54 @@ def test_position_tp_sl_trigger(temp_journal):
     assert summary["balance"] > 10000.0
     assert summary["total_trades"] == 1
     assert summary["winning_trades"] == 1
+
+
+def test_modify_position_sl_tp(temp_journal):
+    engine = OrderEngine(temp_journal, initial_balance=10000.0)
+    engine.place_order(
+        symbol="EURUSD",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+        stop_loss=1.0900,
+        take_profit=1.1100,
+        current_market_price=1.1000,
+    )
+    positions = engine.get_open_positions()
+    pos_id = positions[0]["position_id"]
+
+    # Modify SL to 1.0850 and TP to 1.1200
+    res = engine.modify_position(pos_id, stop_loss=1.0850, take_profit=1.1200)
+    assert res is not None
+    assert res["stop_loss"] == 1.0850
+    assert res["take_profit"] == 1.1200
+
+    updated_pos = engine.get_open_positions()[0]
+    assert updated_pos["stop_loss"] == 1.0850
+    assert updated_pos["take_profit"] == 1.1200
+
+
+def test_partial_position_close(temp_journal):
+    engine = OrderEngine(temp_journal, initial_balance=10000.0)
+    engine.place_order(
+        symbol="EURUSD",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+        current_market_price=1.1000,
+    )
+    positions = engine.get_open_positions()
+    pos_id = positions[0]["position_id"]
+
+    # Close 0.40 Lots at 1.1050 (50 pips profit)
+    record = engine.close_position(pos_id, current_price=1.1050, reason="PARTIAL", close_quantity=0.40)
+    assert record is not None
+    assert record["quantity"] == 0.40
+    assert record["pnl"] > 0
+
+    # Remaining position should have 0.60 Lots open
+    remaining_positions = engine.get_open_positions()
+    assert len(remaining_positions) == 1
+    assert remaining_positions[0]["quantity"] == 0.60
+
+

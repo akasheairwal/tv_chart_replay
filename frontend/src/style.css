@@ -2189,3 +2189,1001 @@ body {
   color: var(--tv-fg-muted);
   grid-row: 3;
 }
+
+/* ===================================================================
+   10. EXNESS RISK CALCULATOR STYLES
+   =================================================================== */
+
+.exness-mode-row {
+  display: flex;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--tv-border);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 12px;
+  gap: 4px;
+}
+
+.exness-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tv-fg-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.exness-mode-btn:hover {
+  color: var(--tv-fg-bright);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.exness-mode-btn.active {
+  background: #2962ff;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(41, 98, 255, 0.4);
+}
+
+.risk-calc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(18, 24, 38, 0.7);
+  border: 1px solid rgba(41, 98, 255, 0.2);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.unit-toggle-group, .mode-chips-group {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--tv-border-subtle);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.unit-toggle-btn, .mode-chip {
+  background: transparent;
+  border: none;
+  color: var(--tv-fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.unit-toggle-btn:hover, .mode-chip:hover {
+  color: var(--tv-fg-bright);
+}
+
+.unit-toggle-btn.active, .mode-chip.active {
+  background: var(--tv-accent);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.rr-presets-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.rr-preset-label {
+  font-size: 10px;
+  color: var(--tv-fg-muted);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.rr-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--tv-border);
+  color: var(--tv-fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rr-chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--tv-fg-bright);
+}
+
+.rr-chip.active {
+  background: rgba(8, 153, 129, 0.25);
+  border-color: #089981;
+  color: #34d399;
+}
+
+.select-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+}
+
+.rc-metrics-card {
+  background: rgba(13, 18, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 4px;
+}
+
+.rc-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rc-card-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--tv-fg-muted);
+}
+
+.rc-lots-badge {
+  background: rgba(41, 98, 255, 0.2);
+  border: 1px solid rgba(41, 98, 255, 0.5);
+  color: #60a5fa;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.rc-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rc-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rc-metric-label {
+  font-size: 9.5px;
+  color: var(--tv-fg-muted);
+  font-weight: 500;
+}
+
+.rc-metric-value {
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--tv-fg-bright);
+}
+
+.rc-metric-value.risk-red {
+  color: #f87171;
+}
+
+.rc-metric-value.reward-green {
+  color: #34d399;
+}
+
+.rc-metric-value.margin-warning {
+  color: #f87171;
+  animation: marginPulse 1.5s infinite;
+}
+
+@keyframes marginPulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.rc-warning-banner {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(242, 54, 69, 0.15);
+  border: 1px solid rgba(242, 54, 69, 0.4);
+  border-radius: 6px;
+  color: #f87171;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* ===================================================================
+   11. SL / TP CONFIRMATION DIALOG MODAL
+   =================================================================== */
+
+.sltp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 23, 0.82);
+  backdrop-filter: blur(6px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeInModal 0.2s ease-out;
+}
+
+@keyframes fadeInModal {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.sltp-modal-dialog {
+  width: 100%;
+  max-width: 440px;
+  background: rgba(19, 24, 38, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sltp-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sltp-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--tv-fg-bright);
+}
+
+.sltp-modal-icon {
+  display: flex;
+  color: var(--tv-accent);
+}
+
+.sltp-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--tv-fg-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.sltp-modal-close:hover {
+  color: var(--tv-fg-bright);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sltp-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sltp-pos-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sltp-sym-badge {
+  background: rgba(41, 98, 255, 0.2);
+  border: 1px solid rgba(41, 98, 255, 0.4);
+  color: #60a5fa;
+  font-weight: 700;
+  font-size: 11.5px;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.sltp-side-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #ffffff;
+}
+
+.sltp-side-badge.long {
+  background: #089981;
+}
+
+.sltp-side-badge.short {
+  background: #f23645;
+}
+
+.sltp-lots-badge {
+  background: rgba(255, 183, 3, 0.15);
+  border: 1px solid rgba(255, 183, 3, 0.35);
+  color: #ffb703;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.sltp-param-card {
+  background: rgba(13, 18, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sltp-param-card.sl-card {
+  border-color: rgba(242, 54, 69, 0.35);
+  background: linear-gradient(180deg, rgba(242, 54, 69, 0.08) 0%, rgba(13, 18, 30, 0.85) 100%);
+}
+
+.sltp-param-card.tp-card {
+  border-color: rgba(8, 153, 129, 0.35);
+  background: linear-gradient(180deg, rgba(8, 153, 129, 0.08) 0%, rgba(13, 18, 30, 0.85) 100%);
+}
+
+.sltp-param-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tv-fg-muted);
+}
+
+.sltp-price-compare-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.sltp-price-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sltp-box-label {
+  font-size: 9.5px;
+  color: var(--tv-fg-muted);
+}
+
+.sltp-box-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tv-fg-bright);
+}
+
+.sltp-price-box.highlight .sltp-box-price {
+  color: #60a5fa;
+}
+
+.sltp-compare-arrow {
+  font-size: 14px;
+  color: var(--tv-fg-muted);
+}
+
+.sltp-metrics-diff-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sltp-diff-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+}
+
+.sltp-diff-label {
+  color: var(--tv-fg-muted);
+}
+
+.sltp-diff-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: var(--tv-fg-bright);
+}
+
+.sltp-diff-val.risk-red {
+  color: #f87171;
+}
+
+.sltp-diff-val.reward-green {
+  color: #34d399;
+}
+
+.sltp-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sltp-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sltp-btn.secondary-btn {
+  background: transparent;
+  border: 1px solid var(--tv-border);
+  color: var(--tv-fg-muted);
+}
+
+.sltp-btn.secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tv-fg-bright);
+}
+
+.sltp-btn.primary-btn {
+  background: #2962ff;
+  border: none;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(41, 98, 255, 0.35);
+}
+
+.sltp-btn.primary-btn:hover {
+  background: #1e52db;
+  transform: translateY(-1px);
+}
+
+.sltp-btn.primary-btn.sl-btn {
+  background: #f23645;
+  box-shadow: 0 2px 10px rgba(242, 54, 69, 0.35);
+}
+
+.sltp-btn.primary-btn.sl-btn:hover {
+  background: #d92b3a;
+}
+
+.sltp-btn.primary-btn.tp-btn {
+  background: #089981;
+  box-shadow: 0 2px 10px rgba(8, 153, 129, 0.35);
+}
+
+.sltp-btn.primary-btn.tp-btn:hover {
+  background: #067a67;
+}
+
+/* Edit Mode Form Styles */
+.sltp-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sltp-edit-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sltp-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tv-fg-muted);
+}
+
+.sltp-field-label.sl-label {
+  color: #f87171;
+}
+
+.sltp-field-label.tp-label {
+  color: #34d399;
+}
+
+.sltp-field-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sltp-edit-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--tv-border);
+  border-radius: 6px;
+  color: var(--tv-fg-bright);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.sltp-edit-input:focus {
+  border-color: #60a5fa;
+  outline: none;
+}
+
+.sltp-input-hint {
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--tv-fg-muted);
+  white-space: nowrap;
+}
+
+/* ===================================================================
+   12. PARTIAL POSITION CLOSE DIALOG MODAL & DRAWER ACTION BUTTONS
+   =================================================================== */
+
+.partial-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 23, 0.82);
+  backdrop-filter: blur(6px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeInModal 0.2s ease-out;
+}
+
+.partial-modal-dialog {
+  width: 100%;
+  max-width: 420px;
+  background: rgba(19, 24, 38, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.partial-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.partial-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--tv-fg-bright);
+}
+
+.partial-modal-icon {
+  display: flex;
+  color: #ffb703;
+}
+
+.partial-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--tv-fg-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.partial-modal-close:hover {
+  color: var(--tv-fg-bright);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.partial-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.partial-pos-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.partial-sym-badge {
+  background: rgba(41, 98, 255, 0.2);
+  border: 1px solid rgba(41, 98, 255, 0.4);
+  color: #60a5fa;
+  font-weight: 700;
+  font-size: 11.5px;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.partial-side-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: #ffffff;
+}
+
+.partial-side-badge.long {
+  background: #089981;
+}
+
+.partial-side-badge.short {
+  background: #f23645;
+}
+
+.partial-total-lots {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tv-fg-muted);
+}
+
+.partial-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.partial-input-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tv-fg-muted);
+}
+
+.partial-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.partial-lot-input {
+  flex: 1;
+  padding: 7px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--tv-border);
+  border-radius: 6px;
+  color: #ffb703;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.partial-lot-input:focus {
+  border-color: #ffb703;
+  outline: none;
+}
+
+.partial-input-unit {
+  font-size: 12px;
+  color: var(--tv-fg-muted);
+}
+
+.partial-preset-chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.partial-chip {
+  flex: 1;
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--tv-border);
+  border-radius: 4px;
+  color: var(--tv-fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.partial-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--tv-fg-bright);
+}
+
+.partial-chip.active {
+  background: rgba(255, 183, 3, 0.2);
+  border-color: #ffb703;
+  color: #ffb703;
+}
+
+.partial-breakdown-card {
+  background: rgba(13, 18, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.partial-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--tv-fg-muted);
+}
+
+.partial-breakdown-row strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: var(--tv-fg-bright);
+}
+
+.partial-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.partial-confirm-btn {
+  background: #ffb703 !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 10px rgba(255, 183, 3, 0.35) !important;
+}
+
+.partial-confirm-btn:hover {
+  background: #e5a400 !important;
+}
+
+/* Position Drawer Action Buttons & Double Click Cells */
+.action-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drawer-action-btn {
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.modify-pos-btn {
+  background: rgba(41, 98, 255, 0.2);
+  border: 1px solid rgba(41, 98, 255, 0.4);
+  color: #60a5fa;
+}
+
+.modify-pos-btn:hover {
+  background: rgba(41, 98, 255, 0.4);
+  color: #ffffff;
+}
+
+.partial-pos-btn {
+  background: rgba(255, 183, 3, 0.15);
+  border: 1px solid rgba(255, 183, 3, 0.4);
+  color: #ffb703;
+}
+
+.partial-pos-btn:hover {
+  background: rgba(255, 183, 3, 0.35);
+  color: #ffffff;
+}
+
+.close-pos-btn {
+  background: rgba(242, 54, 69, 0.15);
+  border: 1px solid rgba(242, 54, 69, 0.4);
+  color: #f87171;
+}
+
+.close-pos-btn:hover {
+  background: rgba(242, 54, 69, 0.35);
+  color: #ffffff;
+}
+
+.editable-cell {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.editable-cell:hover {
+  background: rgba(255, 255, 255, 0.08);
+  outline: 1px dashed rgba(255, 255, 255, 0.3);
+}
+
+/* ==========================================================================
+   Position Tool Settings Modal & Floating Action Bar
+   ========================================================================== */
+.pos-settings-dialog {
+  width: 440px;
+  max-width: 95vw;
+}
+
+.pos-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.pos-badge.long {
+  background: rgba(8, 153, 129, 0.25);
+  color: #089981;
+  border: 1px solid rgba(8, 153, 129, 0.4);
+}
+
+.pos-badge.short {
+  background: rgba(242, 54, 69, 0.25);
+  color: #f23645;
+  border: 1px solid rgba(242, 54, 69, 0.4);
+}
+
+.pos-sym-subtitle {
+  font-size: 11px;
+  color: var(--tv-fg-muted);
+  font-weight: 500;
+}
+
+.pos-input-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pos-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pos-field-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tv-fg-muted);
+}
+
+.pos-field-group input,
+.pos-field-group select {
+  background: rgba(13, 18, 30, 0.9);
+  border: 1px solid var(--tv-border);
+  border-radius: 4px;
+  color: var(--tv-fg-bright);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.pos-field-group input:focus,
+.pos-field-group select:focus {
+  border-color: #2962ff;
+}
+
+.pos-checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--tv-fg-muted);
+  margin-bottom: 12px;
+}
+
+.pos-summary-card {
+  background: rgba(13, 18, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pos-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--tv-fg-muted);
+}
+
+.pos-card-row strong,
+.pos-card-row span.text-red,
+.pos-card-row span.text-green {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+}
+
+.text-red {
+  color: #f23645;
+}
+
+.text-green {
+  color: #089981;
+}
+
+.style-action-btn.trade-btn {
+  background: rgba(8, 153, 129, 0.25) !important;
+  border: 1px solid #089981 !important;
+  color: #089981 !important;
+  font-weight: 700 !important;
+  padding: 3px 8px !important;
+  border-radius: 4px !important;
+  transition: all 0.15s ease;
+}
+
+.style-action-btn.trade-btn:hover {
+  background: #089981 !important;
+  color: #ffffff !important;
+}
+
+.style-action-btn.settings-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid var(--tv-border) !important;
+  color: var(--tv-fg-bright) !important;
+}
+
+.style-action-btn.settings-btn:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+
+.tv-modal-btn.trade {
+  background: #089981 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 10px rgba(8, 153, 129, 0.35) !important;
+}
+
+.tv-modal-btn.trade:hover {
+  background: #067764 !important;
+}

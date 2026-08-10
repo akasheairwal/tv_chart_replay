@@ -607,17 +607,48 @@ class BridgeCommandHandler(QObject):
         def action():
             if self._services is None or not hasattr(self._services, "order_engine"):
                 raise RuntimeError("order engine unavailable")
+            close_qty = None
             if position_id_or_payload.startswith("{"):
                 data = json.loads(position_id_or_payload)
                 pid = data.get("position_id", "")
                 price = float(data.get("current_price", 0.0))
                 rsn = data.get("reason", "MANUAL")
+                if "close_quantity" in data and data["close_quantity"] is not None:
+                    close_qty = float(data["close_quantity"])
             else:
                 pid = json.loads(position_id_or_payload) if position_id_or_payload.startswith('"') else position_id_or_payload
                 price = float(current_price)
                 rsn = reason
-            record = self._services.order_engine.close_position(pid, price, rsn)
+            record = self._services.order_engine.close_position(pid, price, rsn, close_qty)
             return record or {}
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    def modifyPosition(self, payload_json: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "order_engine"):
+                raise RuntimeError("order engine unavailable")
+            data = json.loads(payload_json)
+            pid = data.get("position_id", "")
+
+            def parse_target(val):
+                if val is None or str(val).strip() == "" or str(val).strip().lower() == "null":
+                    return 0.0
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    return 0.0
+
+            sl_val = parse_target(data.get("stop_loss")) if "stop_loss" in data else None
+            tp_val = parse_target(data.get("take_profit")) if "take_profit" in data else None
+
+            res = self._services.order_engine.modify_position(
+                position_id=pid,
+                stop_loss=sl_val,
+                take_profit=tp_val,
+            )
+            return res or {}
 
         return self._envelope(action)
 

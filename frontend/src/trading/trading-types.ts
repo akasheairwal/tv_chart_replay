@@ -67,3 +67,42 @@ export interface TradeRecord {
   closed_at: number;
   exit_reason: string;
 }
+
+export type RiskUnit = 'CURRENCY' | 'PERCENT';
+export type SlInputMode = 'PRICE' | 'PIPS' | 'CURRENCY' | 'PERCENT';
+export type TpInputMode = 'PRICE' | 'PIPS' | 'CURRENCY' | 'RR';
+
+export interface RiskCalculationParams {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  entryPrice: number;
+  accountEquity: number;
+  riskUnit: RiskUnit;
+  riskValue: number;
+  slMode: SlInputMode;
+  slValue: number;
+  tpMode: TpInputMode;
+  tpValue: number;
+  leverage: number;
+}
+
+export interface RiskCalculationResult {
+  calculatedLots: number;
+  contractSize: number;
+  pipSize: number;
+  pipValue: number;
+  slPrice: number | null;
+  slPips: number;
+  tpPrice: number | null;
+  tpPips: number;
+  riskAmount: number;
+  riskPercent: number;
+  rewardAmount: number;
+  rewardPercent: number;
+  rrRatio: number;
+  requiredMargin: number;
+  marginWarning: boolean;
+  isValid: boolean;
+  errorMessage?: string;
+}
+

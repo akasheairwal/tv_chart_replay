@@ -19,6 +19,8 @@ import { SessionDialog } from './ui/session-dialog';
 import { SymbolSearch, type SymbolSearchResult } from './ui/symbol-search';
 import { TradingDrawer } from './ui/trading-drawer';
 import { Watchlist } from './ui/watchlist';
+import { SlTpConfirmDialog, type SlTpModificationRequest } from './ui/sl-tp-confirm-dialog';
+import { PartialCloseDialog, type PartialCloseRequest } from './ui/partial-close-dialog';
 import type { PositionDefinition } from './trading/trading-types';
 
 interface RequestResponse {
@@ -93,6 +95,8 @@ export class App {
   private quickTrade: QuickTradeOverlay | null = null;
   private orderPanel: OrderPanel | null = null;
   private tradingDrawer: TradingDrawer | null = null;
+  private slTpConfirmDialog: SlTpConfirmDialog | null = null;
+  private partialCloseDialog: PartialCloseDialog | null = null;
   private activeSymbol = '';
   private activeTimeframe = '1H';
 
@@ -117,6 +121,7 @@ export class App {
         }
       },
       (posId, price) => void this.handleClosePosition(posId, price),
+      (req) => this.handleModifySlTpRequest(req),
     );
     this.dataStatus = new DataStatus(requireElement('#data-status'), bridge);
 
@@ -197,6 +202,13 @@ export class App {
         requireElement('#drawing-style-bar-container'),
         drawingEngine,
       );
+      this.drawingStyleEditor.onCreateOrder = (params) => {
+        this.orderPanel?.populateFromPositionDrawing(params);
+      };
+
+      drawingEngine.onOpenDrawingSettings = (drawing) => {
+        this.drawingStyleEditor?.openSettingsDialog(drawing);
+      };
 
       this.drawingListDialog = new DrawingListDialog(
         document.body,
@@ -250,10 +262,19 @@ export class App {
 
     const drawerContainer = document.getElementById('trading-drawer-container');
     if (drawerContainer) {
-      this.tradingDrawer = new TradingDrawer(drawerContainer, this.bridge, (positions) => {
-        this.chart.setPositions(positions);
-        this.orderPanel?.setPositions(positions);
-      });
+      this.tradingDrawer = new TradingDrawer(
+        drawerContainer,
+        this.bridge,
+        (positions) => {
+          this.chart.setPositions(positions);
+          this.orderPanel?.setPositions(positions);
+        },
+        (account) => {
+          this.orderPanel?.setAccountSummary(account);
+        },
+        (pos) => this.handleOpenModifySlTpModal(pos),
+        (pos, price) => this.handleOpenPartialCloseModal(pos, price),
+      );
       this.tradingDrawer.start();
     }
 
@@ -436,6 +457,112 @@ export class App {
     }
   }
 
+  private handleModifySlTpRequest(req: SlTpModificationRequest): void {
+    if (!this.slTpConfirmDialog) {
+      this.slTpConfirmDialog = new SlTpConfirmDialog(document.body);
+    }
+    this.slTpConfirmDialog.show(req, (confirmedReq) => {
+      void this.applyPositionModification(confirmedReq);
+    });
+  }
+
+  private async applyPositionModification(req: SlTpModificationRequest): Promise<void> {
+    const { position, type, newPrice, newSlPrice, newTpPrice } = req;
+
+    let targetSl: number | null = position.stop_loss !== undefined && position.stop_loss !== null && position.stop_loss > 0 ? position.stop_loss : null;
+    let targetTp: number | null = position.take_profit !== undefined && position.take_profit !== null && position.take_profit > 0 ? position.take_profit : null;
+
+    if (type === 'SL') {
+      targetSl = newPrice > 0 ? newPrice : null;
+    } else if (type === 'TP') {
+      targetTp = newPrice > 0 ? newPrice : null;
+    } else if (type === 'BOTH') {
+      if (newSlPrice !== undefined) {
+        targetSl = newSlPrice && newSlPrice > 0 ? newSlPrice : null;
+      }
+      if (newTpPrice !== undefined) {
+        targetTp = newTpPrice && newTpPrice > 0 ? newTpPrice : null;
+      }
+    }
+
+    const payload = {
+      position_id: position.position_id,
+      stop_loss: targetSl,
+      take_profit: targetTp,
+    };
+
+    if (this.bridge) {
+      try {
+        await this.bridge.callJson('modifyPosition', payload);
+        await this.refreshPositions();
+        this.showToast(`🎯 Position SL/TP targets updated`);
+      } catch (err) {
+        this.showToast(`❌ Failed to update SL/TP: ${err}`);
+      }
+    } else {
+      const pos = this.inMemoryPositions.find((p) => p.position_id === position.position_id);
+      if (pos) {
+        pos.stop_loss = targetSl ?? undefined;
+        pos.take_profit = targetTp ?? undefined;
+        this.chart.setPositions(this.inMemoryPositions);
+        this.orderPanel?.setPositions(this.inMemoryPositions);
+        this.tradingDrawer?.setInMemoryPositions(this.inMemoryPositions);
+        this.showToast(`🎯 Position SL/TP updated`);
+      }
+    }
+  }
+
+  private handleOpenModifySlTpModal(pos: PositionDefinition): void {
+    if (!this.slTpConfirmDialog) {
+      this.slTpConfirmDialog = new SlTpConfirmDialog(document.body);
+    }
+    this.slTpConfirmDialog.showEditModal(pos, (confirmedReq) => {
+      void this.applyPositionModification(confirmedReq);
+    });
+  }
+
+  private handleOpenPartialCloseModal(pos: PositionDefinition, price: number): void {
+    if (!this.partialCloseDialog) {
+      this.partialCloseDialog = new PartialCloseDialog(document.body);
+    }
+    this.partialCloseDialog.show(pos, price, (req) => {
+      void this.applyPartialClose(req);
+    });
+  }
+
+  private async applyPartialClose(req: PartialCloseRequest): Promise<void> {
+    const { position, closeQuantity, currentPrice } = req;
+    if (this.bridge) {
+      try {
+        const res = await this.bridge.callJson<{ ok: boolean }>('closePosition', {
+          position_id: position.position_id,
+          current_price: currentPrice,
+          close_quantity: closeQuantity,
+          reason: 'PARTIAL_CLOSE',
+        });
+        if (res.ok) {
+          this.showToast(`✂️ Closed ${closeQuantity.toFixed(2)} Lots of ${position.symbol}`);
+        }
+      } catch (err) {
+        this.showToast(`❌ Failed partial close: ${err}`);
+      }
+      await this.refreshPositions();
+    } else {
+      const pos = this.inMemoryPositions.find((p) => p.position_id === position.position_id);
+      if (pos) {
+        if (closeQuantity >= pos.quantity) {
+          this.handleBrowserClosePosition(pos.position_id, currentPrice);
+        } else {
+          pos.quantity = Math.round((pos.quantity - closeQuantity) * 100) / 100;
+          this.chart.setPositions(this.inMemoryPositions);
+          this.orderPanel?.setPositions(this.inMemoryPositions);
+          this.tradingDrawer?.setInMemoryPositions(this.inMemoryPositions);
+          this.showToast(`✂️ Closed ${closeQuantity.toFixed(2)} Lots of ${position.symbol}`);
+        }
+      }
+    }
+  }
+
   private updatePricesAcrossUI(price: number): void {
     if (!price || isNaN(price) || price <= 0) return;
     this.lastPrice = price;
@@ -446,6 +573,32 @@ export class App {
     }
     if (this.orderPanel) {
       this.orderPanel.setCurrentPrice(price);
+    }
+
+    if (!this.bridge && this.inMemoryPositions.length > 0) {
+      const closedPosIds: string[] = [];
+      for (const pos of this.inMemoryPositions) {
+        const isLong = pos.side === 'LONG' || (pos.side as string) === 'BUY';
+        if (pos.stop_loss !== undefined && pos.stop_loss !== null && pos.stop_loss > 0) {
+          const slHit = isLong ? price <= pos.stop_loss : price >= pos.stop_loss;
+          if (slHit) {
+            closedPosIds.push(pos.position_id);
+            this.showToast(`🛑 Stop Loss Hit (${pos.symbol})`);
+            continue;
+          }
+        }
+        if (pos.take_profit !== undefined && pos.take_profit !== null && pos.take_profit > 0) {
+          const tpHit = isLong ? price >= pos.take_profit : price <= pos.take_profit;
+          if (tpHit) {
+            closedPosIds.push(pos.position_id);
+            this.showToast(`🎯 Take Profit Hit (${pos.symbol})`);
+            continue;
+          }
+        }
+      }
+      for (const id of closedPosIds) {
+        this.handleBrowserClosePosition(id, price);
+      }
     }
   }
 

@@ -15,7 +15,11 @@ export class TradingDrawer {
     parent: HTMLElement,
     private readonly bridge: PythonBridge | null,
     private readonly onPositionsUpdated?: (positions: PositionDefinition[]) => void,
+    private readonly onAccountSummaryUpdated?: (account: AccountSummary) => void,
+    private readonly onModifySlTp?: (pos: PositionDefinition) => void,
+    private readonly onPartialClose?: (pos: PositionDefinition, currentPrice: number) => void,
   ) {
+    this.onAccountSummaryUpdated = onAccountSummaryUpdated;
     this.container = this.buildDrawer();
     parent.appendChild(this.container);
   }
@@ -181,6 +185,9 @@ export class TradingDrawer {
       );
       if (accRes.ok && accRes.data) {
         const acc = accRes.data;
+        if (this.onAccountSummaryUpdated) {
+          this.onAccountSummaryUpdated(acc);
+        }
         const totalLots = positions.reduce((sum, p) => sum + (p.quantity || 0), 0);
         const pill = this.container.querySelector('#account-pill');
         if (pill) {
@@ -232,17 +239,24 @@ export class TradingDrawer {
         const pipsText =
           p.pips !== undefined ? ` (${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)}p)` : '';
         const lotsText = `${p.quantity.toFixed(2)} Lots`;
+        const slDisplay = p.stop_loss !== undefined && p.stop_loss !== null && p.stop_loss > 0 ? p.stop_loss.toFixed(4) : '-';
+        const tpDisplay = p.take_profit !== undefined && p.take_profit !== null && p.take_profit > 0 ? p.take_profit.toFixed(4) : '-';
+
         return `
-          <tr>
+          <tr data-id="${p.position_id}">
             <td><strong>${p.symbol}</strong></td>
             <td class="${sideClass}">${p.side}</td>
             <td><strong>${lotsText}</strong></td>
             <td>${p.entry_price.toFixed(4)}</td>
             <td>${p.current_price.toFixed(4)}</td>
-            <td>${p.stop_loss !== undefined && p.stop_loss !== null ? p.stop_loss.toFixed(4) : '-'}</td>
-            <td>${p.take_profit !== undefined && p.take_profit !== null ? p.take_profit.toFixed(4) : '-'}</td>
+            <td class="editable-cell sl-cell" title="Double click to edit SL">${slDisplay}</td>
+            <td class="editable-cell tp-cell" title="Double click to edit TP">${tpDisplay}</td>
             <td class="${pnlClass}">${p.unrealized_pnl >= 0 ? '+' : ''}$${p.unrealized_pnl.toFixed(2)}${pipsText}</td>
-            <td><button class="close-pos-btn" data-id="${p.position_id}" data-price="${p.current_price}">Close</button></td>
+            <td class="action-cell">
+              <button class="drawer-action-btn modify-pos-btn" data-id="${p.position_id}" title="Modify SL / TP Targets">🎯 SL/TP</button>
+              <button class="drawer-action-btn partial-pos-btn" data-id="${p.position_id}" data-price="${p.current_price}" title="Partial Close">✂️ Partial</button>
+              <button class="drawer-action-btn close-pos-btn" data-id="${p.position_id}" data-price="${p.current_price}" title="Close Position">✕ Close</button>
+            </td>
           </tr>
         `;
       })
@@ -253,6 +267,38 @@ export class TradingDrawer {
         const id = (btn as HTMLElement).dataset.id!;
         const price = parseFloat((btn as HTMLElement).dataset.price || '0');
         void this.handleClosePosition(id, price);
+      });
+    });
+
+    tbody.querySelectorAll('.modify-pos-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const pos = positions.find((item) => item.position_id === id);
+        if (pos && this.onModifySlTp) {
+          this.onModifySlTp(pos);
+        }
+      });
+    });
+
+    tbody.querySelectorAll('.partial-pos-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const price = parseFloat((btn as HTMLElement).dataset.price || '0');
+        const pos = positions.find((item) => item.position_id === id);
+        if (pos && this.onPartialClose) {
+          this.onPartialClose(pos, price);
+        }
+      });
+    });
+
+    tbody.querySelectorAll('.editable-cell').forEach((cell) => {
+      cell.addEventListener('dblclick', () => {
+        const tr = (cell as HTMLElement).closest('tr');
+        const id = tr?.dataset.id;
+        const pos = positions.find((item) => item.position_id === id);
+        if (pos && this.onModifySlTp) {
+          this.onModifySlTp(pos);
+        }
       });
     });
   }

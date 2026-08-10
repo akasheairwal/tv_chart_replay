@@ -1,16 +1,38 @@
 /**
- * PositionOverlay — renders active trade positions, live PnL lines, SL/TP levels, and lot sizes on chart.
+ * PositionOverlay — renders active trade positions, live PnL lines, SL/TP levels, lot sizes,
+ * and supports interactive dragging of Stop Loss (SL) & Take Profit (TP) lines on chart.
  */
 
 import type { PositionDefinition } from '../trading/trading-types';
 import type { RenderContext } from '../drawings/drawing-renderers';
+import type { SlTpModificationRequest } from '../ui/sl-tp-confirm-dialog';
+
+export interface SlTpHitItem {
+  position: PositionDefinition;
+  type: 'SL' | 'TP';
+  originalPrice: number;
+  lineY: number;
+  badgeBounds: { x: number; y: number; w: number; h: number };
+}
+
+export interface ActiveSlTpDrag {
+  position: PositionDefinition;
+  type: 'SL' | 'TP';
+  originalPrice: number;
+  currentPrice: number;
+  currentY: number;
+}
 
 export class PositionOverlay {
   private positions: PositionDefinition[] = [];
   private currentSymbol = '';
   private latestMarketPrice = 0;
+
   private closeBtnHits: { id: string; price: number; x: number; y: number; w: number; h: number }[] = [];
   private cardHits: { x: number; y: number; w: number; h: number }[] = [];
+  private sltpHits: SlTpHitItem[] = [];
+
+  private activeDrag: ActiveSlTpDrag | null = null;
 
   constructor(
     private readonly onClosePosition?: (positionId: string, currentPrice: number) => void,
@@ -34,8 +56,12 @@ export class PositionOverlay {
     return this.positions;
   }
 
+  getActiveDrag(): ActiveSlTpDrag | null {
+    return this.activeDrag;
+  }
+
   /**
-   * Check if coordinates hit any close button or position interactive card.
+   * Check if coordinates hit any close button, position card, or SL/TP line/badge.
    */
   hitTest(px: number, py: number): boolean {
     for (const btn of this.closeBtnHits) {
@@ -48,13 +74,23 @@ export class PositionOverlay {
         return true;
       }
     }
+    for (const hit of this.sltpHits) {
+      if (Math.abs(py - hit.lineY) <= 8) {
+        return true;
+      }
+      const b = hit.badgeBounds;
+      if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+        return true;
+      }
+    }
     return false;
   }
 
   /**
-   * Check if click hit a position's quick close button.
+   * Check if mouse down hits close button OR starts dragging an SL/TP line.
    */
-  handlePointerDown(px: number, py: number): boolean {
+  handlePointerDown(px: number, py: number, rc?: RenderContext): boolean {
+    // 1. Close button hit test
     for (const btn of this.closeBtnHits) {
       if (px >= btn.x && px <= btn.x + btn.w && py >= btn.y && py <= btn.y + btn.h) {
         if (this.onClosePosition) {
@@ -63,15 +99,90 @@ export class PositionOverlay {
         return true;
       }
     }
+
+    // 2. SL / TP line hit test for dragging
+    for (const hit of this.sltpHits) {
+      const isLineHit = Math.abs(py - hit.lineY) <= 8;
+      const b = hit.badgeBounds;
+      const isBadgeHit = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+
+      if (isLineHit || isBadgeHit) {
+        let curPrice = hit.originalPrice;
+        if (rc) {
+          const pt = rc.pixelToChart(px, py);
+          if (pt && pt.price > 0) curPrice = pt.price;
+        }
+
+        this.activeDrag = {
+          position: hit.position,
+          type: hit.type,
+          originalPrice: hit.originalPrice,
+          currentPrice: curPrice,
+          currentY: hit.lineY,
+        };
+        return true;
+      }
+    }
+
     return false;
   }
 
   /**
-   * Render all open positions for current symbol on canvas.
+   * Handle mouse move during SL/TP line drag or cursor hover checks.
+   */
+  handlePointerMove(px: number, py: number, rc?: RenderContext): { isDragging: boolean; cursor: string } {
+    if (this.activeDrag) {
+      this.activeDrag.currentY = py;
+      if (rc) {
+        const pt = rc.pixelToChart(px, py);
+        if (pt && pt.price > 0) {
+          this.activeDrag.currentPrice = pt.price;
+        }
+      }
+      return { isDragging: true, cursor: 'ns-resize' };
+    }
+
+    // Check hover state over SL / TP lines
+    for (const hit of this.sltpHits) {
+      const isLineHit = Math.abs(py - hit.lineY) <= 8;
+      const b = hit.badgeBounds;
+      const isBadgeHit = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+      if (isLineHit || isBadgeHit) {
+        return { isDragging: false, cursor: 'ns-resize' };
+      }
+    }
+
+    return { isDragging: false, cursor: 'default' };
+  }
+
+  /**
+   * Mouse release: completes dragging and returns modification request for confirmation modal.
+   */
+  handlePointerUp(): SlTpModificationRequest | null {
+    if (!this.activeDrag) return null;
+
+    const drag = this.activeDrag;
+    this.activeDrag = null;
+
+    if (drag.currentPrice > 0 && Math.abs(drag.currentPrice - drag.originalPrice) > 0.000001) {
+      return {
+        position: drag.position,
+        type: drag.type,
+        originalPrice: drag.originalPrice,
+        newPrice: drag.currentPrice,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Render all open positions, SL/TP lines, and active drag preview ghost lines.
    */
   render(rc: RenderContext): void {
     this.closeBtnHits = [];
     this.cardHits = [];
+    this.sltpHits = [];
 
     const cleanSym = (s: string) => (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     const curClean = cleanSym(this.currentSymbol);
@@ -81,7 +192,7 @@ export class PositionOverlay {
       return posClean === curClean || posClean.startsWith(curClean) || curClean.startsWith(posClean);
     });
 
-    if (activePositions.length === 0) return;
+    if (activePositions.length === 0 && !this.activeDrag) return;
 
     const { ctx, canvasWidth: w, canvasHeight: h } = rc;
 
@@ -93,20 +204,22 @@ export class PositionOverlay {
 
     ctx.save();
 
+    const priceScaleWidth = 85;
+    const rightBoundary = Math.max(50, w - priceScaleWidth);
+
     for (let i = 0; i < activePositions.length; i++) {
       const pos = activePositions[i];
       const isLong = pos.side === 'LONG' || (pos.side as string) === 'BUY';
       const sideText = isLong ? 'BUY' : 'SELL';
       const sideColor = isLong ? '#089981' : '#f23645';
-      const pipSize = pos.entry_price > 50 ? 0.01 : 0.0001;
+      const isCrypto = pos.entry_price > 1000;
+      const isJpy = pos.symbol.includes('JPY');
+      const pipSize = isCrypto ? 1.0 : isJpy ? 0.01 : 0.0001;
       const multiplier = pos.entry_price < 50 && pos.quantity <= 100 ? 100000.0 : 1.0;
 
       // 1. Entry Price Y coordinate
       const entryY = priceToY(pos.entry_price);
       if (entryY === null || isNaN(entryY)) continue;
-
-      const priceScaleWidth = 85;
-      const rightBoundary = Math.max(50, w - priceScaleWidth);
 
       // 2. Current Market Price Y coordinate & live PnL
       const mktPrice =
@@ -131,11 +244,9 @@ export class PositionOverlay {
         const topY = Math.min(entryY, curY);
         const zoneHeight = Math.abs(curY - entryY);
 
-        // Shaded Profit/Loss Zone
         ctx.fillStyle = isProfit ? 'rgba(8, 153, 129, 0.15)' : 'rgba(242, 54, 69, 0.15)';
         ctx.fillRect(0, topY, rightBoundary, zoneHeight);
 
-        // Current Price Tracking Line (dashed)
         ctx.strokeStyle = pnlColor;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
@@ -145,7 +256,6 @@ export class PositionOverlay {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Vertical PnL Connector Line on right
         const connX = rightBoundary - 10;
         ctx.strokeStyle = pnlColor;
         ctx.lineWidth = 2.5;
@@ -154,7 +264,6 @@ export class PositionOverlay {
         ctx.lineTo(connX, curY);
         ctx.stroke();
 
-        // Connector PnL Badge
         const pnlSign = unrealizedPnl >= 0 ? '+' : '';
         const pipsSign = pipsVal >= 0 ? '+' : '';
         const pnlTagText = `${pnlSign}$${unrealizedPnl.toFixed(2)} (${pipsSign}${pipsVal.toFixed(1)}p)`;
@@ -185,16 +294,14 @@ export class PositionOverlay {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 5. Draw Main Position Badge Card (Anchored on Entry Line)
+      // 5. Draw Main Position Badge Card
       const badgeX = 20;
       const badgeY = Math.max(6, Math.min(entryY - 14, h - 35));
       const badgeW = 340;
       const badgeH = 28;
 
-      // Register card bounds for hit test
       this.cardHits.push({ x: badgeX, y: badgeY, w: badgeW, h: badgeH });
 
-      // Background Card
       ctx.fillStyle = 'rgba(19, 23, 34, 0.96)';
       ctx.strokeStyle = sideColor;
       ctx.lineWidth = 1.5;
@@ -207,7 +314,6 @@ export class PositionOverlay {
       ctx.fill();
       ctx.stroke();
 
-      // Side Chip
       ctx.fillStyle = sideColor;
       ctx.beginPath();
       if (typeof (ctx as any).roundRect === 'function') {
@@ -220,18 +326,15 @@ export class PositionOverlay {
       ctx.font = 'bold 11px sans-serif';
       ctx.fillText(sideText, badgeX + 11, badgeY + 18);
 
-      // Lot Size (Bold Gold Text)
       const lotText = `${pos.quantity.toFixed(2)} Lots`;
       ctx.fillStyle = '#ffb703';
       ctx.font = 'bold 11px sans-serif';
       ctx.fillText(lotText, badgeX + 58, badgeY + 18);
 
-      // Entry Price
       ctx.fillStyle = '#9aa0a6';
       ctx.font = '11px sans-serif';
       ctx.fillText(`@ ${pos.entry_price.toFixed(4)}`, badgeX + 130, badgeY + 18);
 
-      // Live PnL ($ + pips)
       const pnlSign = unrealizedPnl >= 0 ? '+' : '';
       const pipsSign = pipsVal >= 0 ? '+' : '';
       const pnlText = `${pnlSign}$${unrealizedPnl.toFixed(2)} (${pipsSign}${pipsVal.toFixed(1)}p)`;
@@ -240,7 +343,6 @@ export class PositionOverlay {
       ctx.font = 'bold 11px sans-serif';
       ctx.fillText(pnlText, badgeX + 195, badgeY + 18);
 
-      // Close [✕] Button
       const closeX = badgeX + badgeW - 24;
       const closeY = badgeY + 4;
       const closeW = 20;
@@ -268,7 +370,7 @@ export class PositionOverlay {
         h: closeH,
       });
 
-      // 6. Right Entry Tag (cleanly positioned inside chart area before price scale)
+      // Entry Tag
       const entryTagText = `${sideText} ${pos.quantity.toFixed(1)}L`;
       ctx.font = 'bold 10px monospace';
       const entryTagW = ctx.measureText(entryTagText).width + 12;
@@ -286,7 +388,7 @@ export class PositionOverlay {
       ctx.fillStyle = '#ffffff';
       ctx.fillText(entryTagText, entryTagX + 6, entryTagY + 14);
 
-      // 7. Stop Loss (SL) Line & Badge
+      // 6. Stop Loss (SL) Line & Badge (with Drag Handle Hit Box)
       if (pos.stop_loss !== undefined && pos.stop_loss !== null && pos.stop_loss > 0) {
         const slY = priceToY(pos.stop_loss);
         if (slY !== null) {
@@ -299,7 +401,6 @@ export class PositionOverlay {
           ctx.stroke();
           ctx.setLineDash([]);
 
-          // SL Tag
           const slDelta = (pos.stop_loss - pos.entry_price) * (isLong ? 1 : -1);
           const slPips = (slDelta / pipSize).toFixed(1);
           const slRisk = (slDelta * pos.quantity * multiplier).toFixed(2);
@@ -308,7 +409,14 @@ export class PositionOverlay {
           const slBadgeX = 20;
           const slBadgeY = Math.max(5, Math.min(slY - 11, h - 25));
 
-          this.cardHits.push({ x: slBadgeX, y: slBadgeY, w: slBadgeW, h: 22 });
+          const badgeBounds = { x: slBadgeX, y: slBadgeY, w: slBadgeW, h: 22 };
+          this.sltpHits.push({
+            position: pos,
+            type: 'SL',
+            originalPrice: pos.stop_loss,
+            lineY: slY,
+            badgeBounds,
+          });
 
           ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
           ctx.strokeStyle = '#f23645';
@@ -330,7 +438,6 @@ export class PositionOverlay {
             slBadgeY + 15,
           );
 
-          // SL Price Scale Badge (anchored inside chart boundary)
           const slTagText = `SL ${pos.stop_loss.toFixed(4)}`;
           ctx.font = 'bold 10px monospace';
           const slTagW = ctx.measureText(slTagText).width + 12;
@@ -350,7 +457,7 @@ export class PositionOverlay {
         }
       }
 
-      // 8. Take Profit (TP) Line & Badge
+      // 7. Take Profit (TP) Line & Badge (with Drag Handle Hit Box)
       if (pos.take_profit !== undefined && pos.take_profit !== null && pos.take_profit > 0) {
         const tpY = priceToY(pos.take_profit);
         if (tpY !== null) {
@@ -363,7 +470,6 @@ export class PositionOverlay {
           ctx.stroke();
           ctx.setLineDash([]);
 
-          // TP Tag
           const tpDelta = (pos.take_profit - pos.entry_price) * (isLong ? 1 : -1);
           const tpPips = (tpDelta / pipSize).toFixed(1);
           const tpReward = (tpDelta * pos.quantity * multiplier).toFixed(2);
@@ -372,7 +478,14 @@ export class PositionOverlay {
           const tpBadgeX = 20;
           const tpBadgeY = Math.max(5, Math.min(tpY - 11, h - 25));
 
-          this.cardHits.push({ x: tpBadgeX, y: tpBadgeY, w: tpBadgeW, h: 22 });
+          const badgeBounds = { x: tpBadgeX, y: tpBadgeY, w: tpBadgeW, h: 22 };
+          this.sltpHits.push({
+            position: pos,
+            type: 'TP',
+            originalPrice: pos.take_profit,
+            lineY: tpY,
+            badgeBounds,
+          });
 
           ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
           ctx.strokeStyle = '#089981';
@@ -394,7 +507,6 @@ export class PositionOverlay {
             tpBadgeY + 15,
           );
 
-          // TP Price Scale Badge (anchored inside chart boundary)
           const tpTagText = `TP ${pos.take_profit.toFixed(4)}`;
           ctx.font = 'bold 10px monospace';
           const tpTagW = ctx.measureText(tpTagText).width + 12;
@@ -413,6 +525,76 @@ export class PositionOverlay {
           ctx.fillText(tpTagText, tpTagX + 6, tpTagY + 13);
         }
       }
+    }
+
+    // 8. Render Active Drag Ghost Preview Line & Live Metrics Badge
+    if (this.activeDrag) {
+      const drag = this.activeDrag;
+      const isSl = drag.type === 'SL';
+      const color = isSl ? '#f23645' : '#089981';
+      const pos = drag.position;
+      const isLong = pos.side === 'LONG' || (pos.side as any) === 'BUY';
+      const isCrypto = pos.entry_price > 1000;
+      const isJpy = pos.symbol.includes('JPY');
+      const pipSize = isCrypto ? 1.0 : isJpy ? 0.01 : 0.0001;
+      const multiplier = pos.entry_price < 50 && pos.quantity <= 100 ? 100000.0 : 1.0;
+
+      const delta = (drag.currentPrice - pos.entry_price) * (isLong ? 1 : -1);
+      const pips = (delta / pipSize).toFixed(1);
+      const dollars = (delta * pos.quantity * multiplier).toFixed(2);
+      const sign = delta >= 0 ? '+' : '';
+
+      const dragY = drag.currentY;
+
+      // Bright glowing preview line
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, dragY);
+      ctx.lineTo(rightBoundary, dragY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+
+      // Drag preview floating card at left
+      const cardText = `NEW ${drag.type}: ${drag.currentPrice.toFixed(4)} (${sign}${pips}p | ${sign}$${dollars})`;
+      ctx.font = 'bold 11px sans-serif';
+      const cardW = ctx.measureText(cardText).width + 20;
+      const cardX = 20;
+      const cardY = Math.max(5, Math.min(dragY - 14, h - 30));
+
+      ctx.fillStyle = isSl ? 'rgba(242, 54, 69, 0.95)' : 'rgba(8, 153, 129, 0.95)';
+      ctx.beginPath();
+      if (typeof (ctx as any).roundRect === 'function') {
+        (ctx as any).roundRect(cardX, cardY, cardW, 26, 6);
+      } else {
+        ctx.rect(cardX, cardY, cardW, 26);
+      }
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(cardText, cardX + 10, cardY + 17);
+
+      // Price scale tag
+      const scaleText = `RELEASE TO MODIFY ${drag.type}`;
+      ctx.font = 'bold 9px monospace';
+      const scaleW = ctx.measureText(scaleText).width + 12;
+      const scaleX = rightBoundary - scaleW - 4;
+      const scaleY = Math.max(4, Math.min(dragY - 9, h - 22));
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (typeof (ctx as any).roundRect === 'function') {
+        (ctx as any).roundRect(scaleX, scaleY, scaleW, 18, 4);
+      } else {
+        ctx.rect(scaleX, scaleY, scaleW, 18);
+      }
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(scaleText, scaleX + 6, scaleY + 13);
     }
 
     ctx.restore();
