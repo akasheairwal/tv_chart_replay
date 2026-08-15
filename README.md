@@ -14,11 +14,6 @@ Standalone historical trading chart replay terminal (TradingView-style).
 - Build plan (waves & phases): `docs/BUILD_PLAN.md`
 - Bridge contract: `docs/bridge-contract.md`
 
-## Status
-
-Wave 0 — Foundation & Bridge Shell (in progress).
-Wave markers are tracked in `docs/BUILD_PLAN.md`.
-
 ## Requirements
 
 - Python **3.12** (3.11 also supported; not 3.14 yet)
