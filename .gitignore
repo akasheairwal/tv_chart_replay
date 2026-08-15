@@ -27,3 +27,7 @@ logs/
 *.log
 Thumbs.db
 .DS_Store
+
+.scratch/
+scratch/
+tests/
