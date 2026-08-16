@@ -5,9 +5,9 @@ accessible to the chart, indicator engines, strategy simulators, or bridge event
 """
 from __future__ import annotations
 
-import polars as pl
-
 from typing import Any
+
+import polars as pl
 
 from app.data.models.candle import CANONICAL_COLUMNS
 

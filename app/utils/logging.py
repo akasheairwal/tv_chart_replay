@@ -28,7 +28,7 @@ class RingBufferLogHandler(logging.Handler):
                 "message": msg,
             }
             self.records.append(entry)
-        except Exception:
+        except Exception:  # noqa: BLE001 - logging handlers must safely delegate to handleError
             self.handleError(record)
 
     def get_logs(self, min_level: str = "INFO") -> list[dict[str, Any]]:

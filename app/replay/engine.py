@@ -124,7 +124,7 @@ class ReplayEngine(QObject):
     ) -> ReplayState:
         """Initialize a random replay session with safe warmup and bounds."""
         dataset = IsolatedDataset(frame)
-        start_idx, end_idx, effective_warmup = select_random_replay_window(
+        start_idx, _, effective_warmup = select_random_replay_window(
             dataset.total_candles,
             warmup_candles=warmup_candles,
             replay_length=replay_length,
@@ -187,8 +187,9 @@ class ReplayEngine(QObject):
 
         new_candles = [self._dataset.candle_at(i) for i in range(old_index + 1, new_index + 1)]
 
-        for candle in new_candles:
-            self._emit("replay.candle", {"candle": candle, "index": self._state.current_index})
+        for idx_offset, candle in enumerate(new_candles):
+            candle_idx = old_index + 1 + idx_offset
+            self._emit("replay.candle", {"candle": candle, "index": candle_idx})
             if self.on_tick and len(candle) >= 5 and self._state:
                 try:
                     self.on_tick(

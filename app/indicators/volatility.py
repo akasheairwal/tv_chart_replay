@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
@@ -51,8 +51,8 @@ class ATRIndicator(Indicator):
     display_name = "Average True Range"
     category = "volatility"
     overlay = False
-    default_params = {"period": 14}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 100, "default": 14},
     }
 
@@ -71,8 +71,8 @@ class BollingerBandsIndicator(Indicator):
     display_name = "Bollinger Bands"
     category = "volatility"
     overlay = True
-    default_params = {"period": 20, "std_dev": 2.0}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 20, "std_dev": 2.0}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 200, "default": 20},
         "std_dev": {"type": "float", "min": 0.5, "max": 5.0, "default": 2.0},
     }
@@ -110,8 +110,8 @@ class KeltnerChannelsIndicator(Indicator):
     display_name = "Keltner Channels"
     category = "volatility"
     overlay = True
-    default_params = {"ema_period": 20, "atr_period": 10, "multiplier": 2.0}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"ema_period": 20, "atr_period": 10, "multiplier": 2.0}
+    param_schema: ClassVar[dict[str, Any]] = {
         "ema_period": {"type": "int", "min": 1, "max": 200, "default": 20},
         "atr_period": {"type": "int", "min": 1, "max": 100, "default": 10},
         "multiplier": {"type": "float", "min": 0.5, "max": 5.0, "default": 2.0},

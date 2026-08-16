@@ -60,16 +60,32 @@ class Order:
         )
 
 
-def get_pip_size(symbol: str) -> float:
-    return 0.01 if "JPY" in symbol.upper() else 0.0001
+def get_symbol_contract_details(symbol: str, price: float = 0.0) -> tuple[float, float]:
+    """Return (contract_size, pip_size) matching the frontend risk calculator contract specifications."""
+    sym = symbol.upper().replace("=X", "").replace("-USD", "").replace("/", "")
+    if "XAU" in sym or "GOLD" in sym:
+        return 100.0, 0.01
+    if "XAG" in sym or "SILVER" in sym:
+        return 5000.0, 0.001
+    if "BTC" in sym or "ETH" in sym:
+        return 1.0, 1.0
+    if "JPY" in sym:
+        return 100_000.0, 0.01
+    if len(sym) == 6 and sym.isalpha():
+        return 100_000.0, 0.0001
+    if price > 1000.0:
+        return 1.0, 1.0
+    return 1.0, 0.01 if price > 50.0 else 0.0001
 
 
-def get_contract_multiplier(symbol: str, quantity: float) -> float:
-    sym = symbol.upper().replace("=X", "").replace("-USD", "")
-    # Standard forex 6-letter pairs where quantity is entered in lots (e.g. 0.01 - 100 lots)
-    if len(sym) == 6 and sym.isalpha() and quantity <= 100.0:
-        return 100_000.0
-    return 1.0
+def get_pip_size(symbol: str, price: float = 0.0) -> float:
+    _, pip_size = get_symbol_contract_details(symbol, price)
+    return pip_size
+
+
+def get_contract_multiplier(symbol: str, quantity: float = 1.0, price: float = 0.0) -> float:
+    contract_size, _ = get_symbol_contract_details(symbol, price)
+    return contract_size
 
 
 @dataclass
@@ -93,8 +109,9 @@ class Position:
 
     def update_pnl(self, market_price: float, pip_size: float | None = None) -> None:
         self.current_price = market_price
-        eff_pip_size = pip_size if pip_size is not None else get_pip_size(self.symbol)
-        multiplier = get_contract_multiplier(self.symbol, self.quantity)
+        contract_size, def_pip = get_symbol_contract_details(self.symbol, self.entry_price)
+        eff_pip_size = pip_size if pip_size is not None else def_pip
+        multiplier = contract_size
         price_diff = (market_price - self.entry_price) if self.side == "LONG" else (self.entry_price - market_price)
         self.unrealized_pnl = price_diff * self.quantity * multiplier
 
@@ -114,7 +131,7 @@ class Position:
                     self.stop_loss = new_sl
 
     def to_dict(self) -> dict[str, Any]:
-        pip_size = get_pip_size(self.symbol)
+        pip_size = get_pip_size(self.symbol, self.entry_price)
         price_diff = (self.current_price - self.entry_price) if self.side == "LONG" else (self.entry_price - self.current_price)
         pips = (price_diff / pip_size) if pip_size > 0 else 0.0
         return {

@@ -4,6 +4,7 @@
  */
 
 import type { PositionDefinition } from '../trading/trading-types';
+import { getSymbolContractDetails } from '../trading/risk-calculator';
 import type { RenderContext } from '../drawings/drawing-renderers';
 import type { SlTpModificationRequest } from '../ui/sl-tp-confirm-dialog';
 
@@ -212,10 +213,7 @@ export class PositionOverlay {
       const isLong = pos.side === 'LONG' || (pos.side as string) === 'BUY';
       const sideText = isLong ? 'BUY' : 'SELL';
       const sideColor = isLong ? '#089981' : '#f23645';
-      const isCrypto = pos.entry_price > 1000;
-      const isJpy = pos.symbol.includes('JPY');
-      const pipSize = isCrypto ? 1.0 : isJpy ? 0.01 : 0.0001;
-      const multiplier = pos.entry_price < 50 && pos.quantity <= 100 ? 100000.0 : 1.0;
+      const { contractSize: multiplier, pipSize } = getSymbolContractDetails(pos.symbol, pos.entry_price);
 
       // 1. Entry Price Y coordinate
       const entryY = priceToY(pos.entry_price);

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
@@ -19,8 +19,8 @@ class OBVIndicator(Indicator):
     display_name = "On-Balance Volume"
     category = "volume"
     overlay = False
-    default_params = {}
-    param_schema = {}
+    default_params: ClassVar[dict[str, Any]] = {}
+    param_schema: ClassVar[dict[str, Any]] = {}
 
     def calculate(self, frame: pl.DataFrame, params: dict[str, Any] | None = None) -> dict[str, list[float | None]]:
         close = frame["close"].to_numpy()
@@ -48,8 +48,8 @@ class MFIIndicator(Indicator):
     display_name = "Money Flow Index"
     category = "volume"
     overlay = False
-    default_params = {"period": 14}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 100, "default": 14},
     }
 

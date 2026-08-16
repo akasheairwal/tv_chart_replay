@@ -18,6 +18,8 @@ def connect(database_path: Path | str) -> sqlite3.Connection:
     # connection; SQLite's serialized mode handles concurrent access.
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA foreign_keys = ON")
     run_migrations(conn)
     return conn

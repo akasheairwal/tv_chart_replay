@@ -12,10 +12,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 def build_frontend() -> bool:
     print("=== Step 1: Building Frontend Bundle (npm run build) ===")
     try:
-        res = subprocess.run(["npm.cmd" if sys.platform == "win32" else "npm", "run", "build"], cwd=ROOT_DIR, check=True)
+        subprocess.run(["npm.cmd" if sys.platform == "win32" else "npm", "run", "build"], cwd=ROOT_DIR, check=True)
         print("✅ Frontend build completed successfully.")
         return True
-    except Exception as err:
+    except subprocess.SubprocessError as err:
         print(f"❌ Frontend build failed: {err}")
         return False
 
@@ -45,7 +45,7 @@ def build_executable() -> bool:
 
     print(f"Executing: {' '.join(cmd)}")
     try:
-        res = subprocess.run(cmd, cwd=ROOT_DIR, check=True)
+        subprocess.run(cmd, cwd=ROOT_DIR, check=True)
         exe_path = ROOT_DIR / "dist" / "TradingChartReplayer" / "TradingChartReplayer.exe"
         if exe_path.exists():
             print(f"\n🎉 Standalone Windows Executable built successfully!\nExecutable location: {exe_path}")
@@ -56,7 +56,7 @@ def build_executable() -> bool:
     except subprocess.CalledProcessError as err:
         print(f"❌ PyInstaller build failed with return code {err.returncode}")
         return False
-    except Exception as err:
+    except OSError as err:
         print(f"❌ Packaging failed: {err}")
         return False
 

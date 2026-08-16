@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
@@ -30,8 +30,8 @@ class RSIIndicator(Indicator):
     display_name = "Relative Strength Index"
     category = "momentum"
     overlay = False
-    default_params = {"period": 14, "source": "close"}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14, "source": "close"}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 200, "default": 14},
         "source": {"type": "string", "options": ["close", "open", "high", "low"], "default": "close"},
     }
@@ -83,8 +83,8 @@ class MACDIndicator(Indicator):
     display_name = "Moving Average Convergence Divergence"
     category = "momentum"
     overlay = False
-    default_params = {"fast_period": 12, "slow_period": 26, "signal_period": 9}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"fast_period": 12, "slow_period": 26, "signal_period": 9}
+    param_schema: ClassVar[dict[str, Any]] = {
         "fast_period": {"type": "int", "min": 1, "max": 100, "default": 12},
         "slow_period": {"type": "int", "min": 1, "max": 200, "default": 26},
         "signal_period": {"type": "int", "min": 1, "max": 100, "default": 9},
@@ -126,8 +126,8 @@ class StochasticIndicator(Indicator):
     display_name = "Stochastic Oscillator"
     category = "momentum"
     overlay = False
-    default_params = {"k_period": 14, "d_period": 3, "smooth_k": 3}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"k_period": 14, "d_period": 3, "smooth_k": 3}
+    param_schema: ClassVar[dict[str, Any]] = {
         "k_period": {"type": "int", "min": 1, "max": 100, "default": 14},
         "d_period": {"type": "int", "min": 1, "max": 50, "default": 3},
         "smooth_k": {"type": "int", "min": 1, "max": 50, "default": 3},

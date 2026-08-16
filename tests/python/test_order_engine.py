@@ -134,3 +134,52 @@ def test_partial_position_close(temp_journal):
     assert remaining_positions[0]["quantity"] == 0.60
 
 
+def test_gold_and_crypto_contract_multiplier(temp_journal):
+    engine = OrderEngine(temp_journal, initial_balance=10000.0)
+    # 1 Lot Gold (XAUUSD) bought at 2000, closed at 2010 ($10 gain * 1 lot * 100 oz = $1000)
+    order_gold = engine.place_order(
+        symbol="XAUUSD",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+        current_market_price=2000.0,
+    )
+    pos_gold_id = engine.get_open_positions()[0]["position_id"]
+    rec_gold = engine.close_position(pos_gold_id, current_price=2010.0)
+    assert rec_gold["pnl"] == 1000.0
+
+    # 1 BTC bought at 60000, closed at 61000 ($1000 gain * 1 unit * 1 = $1000)
+    order_btc = engine.place_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+        current_market_price=60000.0,
+    )
+    pos_btc_id = engine.get_open_positions()[0]["position_id"]
+    rec_btc = engine.close_position(pos_btc_id, current_price=61000.0)
+    assert rec_btc["pnl"] == 1000.0
+
+
+def test_replay_timestamp_persistence(temp_journal):
+    engine = OrderEngine(temp_journal, initial_balance=10000.0)
+    sim_time = 1700000000.0
+    engine.on_replay_tick("EURUSD", 1.1000, 1.1020, 1.0980, 1.1000, timestamp=sim_time)
+    order = engine.place_order(
+        symbol="EURUSD",
+        side="BUY",
+        order_type="MARKET",
+        quantity=1.0,
+        current_market_price=1.1000,
+        timestamp=sim_time,
+    )
+    assert order.created_at == sim_time
+    pos_id = engine.get_open_positions()[0]["position_id"]
+    close_time = sim_time + 3600.0
+    engine.on_replay_tick("EURUSD", 1.1050, 1.1060, 1.1040, 1.1050, timestamp=close_time)
+    rec = engine.close_position(pos_id, current_price=1.1050)
+    assert rec["opened_at"] == sim_time
+    assert rec["closed_at"] == close_time
+
+
+

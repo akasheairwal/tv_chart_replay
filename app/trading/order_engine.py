@@ -9,7 +9,13 @@ from collections.abc import Callable
 from typing import Any
 
 from app.trading.journal import TradeJournal
-from app.trading.models import AccountSummary, Order, Position, get_contract_multiplier
+from app.trading.models import (
+    AccountSummary,
+    Order,
+    Position,
+    get_contract_multiplier,
+    get_pip_size,
+)
 
 
 class OrderEngine:
@@ -66,7 +72,7 @@ class OrderEngine:
         sym_clean = symbol.upper()
 
         exec_price = current_market_price if current_market_price > 0 else self._latest_prices.get(sym_clean, price)
-        pip_size = 1.0 if exec_price > 1000.0 else (0.01 if (exec_price > 50.0 or "JPY" in sym_clean) else 0.0001)
+        pip_size = get_pip_size(sym_clean, exec_price)
 
         # 1. Resolve SL Target Price (absolute price vs pips distance)
         clean_sl = None
@@ -164,7 +170,7 @@ class OrderEngine:
 
             exec_price = pos.entry_price
             side_clean = "BUY" if str(pos.side).upper() in ("LONG", "BUY") else "SELL"
-            pip_size = 1.0 if exec_price > 1000.0 else (0.01 if (exec_price > 50.0 or "JPY" in pos.symbol.upper()) else 0.0001)
+            pip_size = get_pip_size(pos.symbol, exec_price)
 
             if stop_loss is not None:
                 sl_val = float(stop_loss)
@@ -304,11 +310,13 @@ class OrderEngine:
             is_partial = True
             qty_to_close = round(float(close_quantity), 2)
 
-        multiplier = get_contract_multiplier(pos.symbol, qty_to_close)
+        multiplier = get_contract_multiplier(pos.symbol, qty_to_close, pos.entry_price)
         if pos.side == "LONG":
             pnl = (close_price - pos.entry_price) * qty_to_close * multiplier - self.commission_per_trade
         else:
             pnl = (pos.entry_price - close_price) * qty_to_close * multiplier - self.commission_per_trade
+
+        closed_ts = self._current_replay_timestamp if self._current_replay_timestamp > 0 else time.time()
 
         if is_partial:
             pos.quantity = round(pos.quantity - qty_to_close, 2)
@@ -316,7 +324,7 @@ class OrderEngine:
             exit_rsn = f"PARTIAL_CLOSE ({reason})"
         else:
             pos.status = "CLOSED"
-            pos.closed_at = time.time()
+            pos.closed_at = closed_ts
             pos.current_price = close_price
             pos.realized_pnl = pnl
             pos.unrealized_pnl = 0.0
@@ -345,7 +353,7 @@ class OrderEngine:
             pnl=pnl,
             commission=self.commission_per_trade,
             opened_at=pos.opened_at,
-            closed_at=time.time(),
+            closed_at=closed_ts,
             exit_reason=exit_rsn,
         )
 

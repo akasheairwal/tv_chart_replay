@@ -34,10 +34,14 @@ def test_replay_step_forward_and_backward():
     assert len(engine.visible_candles()) == 12
 
     # Step forward 5
+    events.clear()
     state, new_candles = engine.step_forward(5)
     assert state.current_index == 16
     assert len(new_candles) == 5
     assert len(engine.visible_candles()) == 17
+    emitted_candle_events = [e[1] for e in events if e[0] == "replay.candle"]
+    assert len(emitted_candle_events) == 5
+    assert [e["index"] for e in emitted_candle_events] == [12, 13, 14, 15, 16]
 
     # Step backward 3
     state, visible = engine.step_backward(3)

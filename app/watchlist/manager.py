@@ -5,8 +5,7 @@ Watchlist Manager — thread-safe SQLite persistence for user watchlist and favo
 import sqlite3
 import threading
 import time
-
-from typing import Any, List, Optional
+from typing import Any
 
 from app.watchlist.models import WatchlistItem
 

@@ -10,6 +10,8 @@ from app.data.downloader.rate_limiter import RateLimiter
 from app.data.models.symbol import AssetClass, Symbol
 from app.data.models.timeframe import H1, M1, M5, Timeframe
 from app.data.providers.binance import BinanceProvider
+from app.data.providers.dukascopy import DukascopyProvider
+from app.data.providers.yahoo import YahooProvider
 from app.data.providers.catalog import (
     binance_pair,
     curated_catalog,
@@ -124,3 +126,21 @@ def test_broken_provider_still_resolves() -> None:
     broken = BrokenProvider(priority=1000)
     registry = ProviderRegistry([broken])
     assert registry.resolve(_symbol(), H1) is broken
+
+
+def test_yahoo_derived_interval_resolution() -> None:
+    provider = YahooProvider()
+    assert provider._resolve_interval(H1) == ("1H", "1h")
+    assert provider._resolve_interval(Timeframe("4H")) == ("1H", "1h")
+    assert provider._resolve_interval(Timeframe("2H")) == ("1H", "1h")
+    assert provider._resolve_interval(Timeframe("3m")) == ("1m", "1m")
+    assert provider._resolve_interval(Timeframe("10m")) == ("5m", "5m")
+
+
+def test_dukascopy_derived_interval_resolution() -> None:
+    provider = DukascopyProvider()
+    assert provider._resolve_interval(H1) == ("1H", "1HOUR")
+    assert provider._resolve_interval(Timeframe("2H")) == ("1H", "1HOUR")
+    assert provider._resolve_interval(Timeframe("4H")) == ("4H", "4HOUR")
+    assert provider._resolve_interval(Timeframe("3m")) == ("1m", "1MIN")
+

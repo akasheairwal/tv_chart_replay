@@ -190,7 +190,7 @@ class BridgeCommandHandler(QObject):
             try:
                 val = json.loads(step_json) if step_json.startswith('"') else step_json
                 step = int(val)
-            except Exception:
+            except (ValueError, TypeError, json.JSONDecodeError):
                 step = 1
             state, new_candles = self._services.replay_engine.step_forward(step)
             return {"state": state.to_dict(), "candles": new_candles}
@@ -203,7 +203,7 @@ class BridgeCommandHandler(QObject):
             try:
                 val = json.loads(step_json) if step_json.startswith('"') else step_json
                 step = int(val)
-            except Exception:
+            except (ValueError, TypeError, json.JSONDecodeError):
                 step = 1
             state, visible = self._services.replay_engine.step_backward(step)
             return {"state": state.to_dict(), "candles": visible}
@@ -234,7 +234,7 @@ class BridgeCommandHandler(QObject):
         def action() -> Any:
             try:
                 val = json.loads(speed_json) if speed_json.startswith('"') else speed_json
-            except Exception:
+            except (ValueError, TypeError, json.JSONDecodeError):
                 val = speed_json
             speed = float(val)
             state = self._services.replay_engine.set_speed(speed)
@@ -565,7 +565,7 @@ class BridgeCommandHandler(QObject):
                                 mkt_price = float(cand[4])
                             elif cand and isinstance(cand, dict):
                                 mkt_price = float(cand.get("close", 0.0))
-                    except Exception:
+                    except (AttributeError, KeyError, IndexError, ValueError, TypeError):
                         pass
 
             sl_raw = data.get("stop_loss")
@@ -584,6 +584,7 @@ class BridgeCommandHandler(QObject):
                 take_profit=clean_tp,
                 trailing_stop_pips=data.get("trailing_stop_pips"),
                 current_market_price=mkt_price,
+                timestamp=float(data.get("timestamp", 0.0)),
             )
             return order.to_dict()
 
@@ -709,7 +710,7 @@ class BridgeCommandHandler(QObject):
                         balance = float(parsed)
                     elif isinstance(parsed, dict):
                         balance = float(parsed.get("initial_balance", 10000.0))
-                except Exception:
+                except (ValueError, TypeError, json.JSONDecodeError):
                     pass
             summary = self._services.order_engine.reset_account(balance)
             return summary.to_dict()

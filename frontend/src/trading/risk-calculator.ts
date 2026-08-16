@@ -8,10 +8,6 @@ import type { RiskCalculationParams, RiskCalculationResult } from './trading-typ
 export function getSymbolContractDetails(symbol: string, price: number): { contractSize: number; pipSize: number } {
   const sym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-  if (price > 1000 || sym.includes('BTC') || sym.includes('ETH')) {
-    return { contractSize: 1.0, pipSize: 1.0 };
-  }
-
   if (sym.includes('XAU') || sym.includes('GOLD')) {
     return { contractSize: 100.0, pipSize: 0.01 };
   }
@@ -20,8 +16,16 @@ export function getSymbolContractDetails(symbol: string, price: number): { contr
     return { contractSize: 5000.0, pipSize: 0.001 };
   }
 
+  if (sym.includes('BTC') || sym.includes('ETH')) {
+    return { contractSize: 1.0, pipSize: 1.0 };
+  }
+
   if (sym.includes('JPY')) {
     return { contractSize: 100_000.0, pipSize: 0.01 };
+  }
+
+  if (price > 1000) {
+    return { contractSize: 1.0, pipSize: 1.0 };
   }
 
   return { contractSize: 100_000.0, pipSize: 0.0001 };

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
@@ -43,8 +43,8 @@ class SMAIndicator(Indicator):
     display_name = "Simple Moving Average"
     category = "trend"
     overlay = True
-    default_params = {"period": 14, "source": "close"}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14, "source": "close"}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 500, "default": 14},
         "source": {"type": "string", "options": ["close", "open", "high", "low"], "default": "close"},
     }
@@ -68,8 +68,8 @@ class EMAIndicator(Indicator):
     display_name = "Exponential Moving Average"
     category = "trend"
     overlay = True
-    default_params = {"period": 14, "source": "close"}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14, "source": "close"}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 500, "default": 14},
         "source": {"type": "string", "options": ["close", "open", "high", "low"], "default": "close"},
     }
@@ -96,8 +96,8 @@ class WMAIndicator(Indicator):
     display_name = "Weighted Moving Average"
     category = "trend"
     overlay = True
-    default_params = {"period": 14, "source": "close"}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14, "source": "close"}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 500, "default": 14},
         "source": {"type": "string", "options": ["close", "open", "high", "low"], "default": "close"},
     }
@@ -115,8 +115,8 @@ class HMAIndicator(Indicator):
     display_name = "Hull Moving Average"
     category = "trend"
     overlay = True
-    default_params = {"period": 14, "source": "close"}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 14, "source": "close"}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 2, "max": 500, "default": 14},
         "source": {"type": "string", "options": ["close", "open", "high", "low"], "default": "close"},
     }
@@ -143,8 +143,8 @@ class VWAPIndicator(Indicator):
     display_name = "Volume Weighted Average Price"
     category = "trend"
     overlay = True
-    default_params = {}
-    param_schema = {}
+    default_params: ClassVar[dict[str, Any]] = {}
+    param_schema: ClassVar[dict[str, Any]] = {}
 
     def calculate(self, frame: pl.DataFrame, params: dict[str, Any] | None = None) -> dict[str, list[float | None]]:
         high = frame["high"].to_numpy()
@@ -169,8 +169,8 @@ class SupertrendIndicator(Indicator):
     display_name = "Supertrend"
     category = "trend"
     overlay = True
-    default_params = {"period": 10, "multiplier": 3.0}
-    param_schema = {
+    default_params: ClassVar[dict[str, Any]] = {"period": 10, "multiplier": 3.0}
+    param_schema: ClassVar[dict[str, Any]] = {
         "period": {"type": "int", "min": 1, "max": 100, "default": 10},
         "multiplier": {"type": "float", "min": 0.5, "max": 10.0, "default": 3.0},
     }
