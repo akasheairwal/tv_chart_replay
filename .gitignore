@@ -32,10 +32,12 @@ Thumbs.db
 scratch/
 tests/
 
-.agents
-.agents\skills
-.chrome_tmp
-.claude
-.github
-.hermes
-.kilocode
+# Agent / Tooling / Local config
+.agents/
+.chrome_tmp/
+.claude/
+.github/
+.hermes/
+.kilocode/
+
+.scripts/
