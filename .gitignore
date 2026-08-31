@@ -31,3 +31,11 @@ Thumbs.db
 .scratch/
 scratch/
 tests/
+
+.agents
+.agents\skills
+.chrome_tmp
+.claude
+.github
+.hermes
+.kilocode
