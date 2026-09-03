@@ -58,7 +58,7 @@ class RSIIndicator(Indicator):
         avg_loss = np.mean(losses[:period])
 
         if avg_loss == 0:
-            rsi[period] = 100.0
+            rsi[period] = 50.0 if avg_gain == 0 else 100.0
         else:
             rs = avg_gain / avg_loss
             rsi[period] = 100.0 - (100.0 / (1.0 + rs))
@@ -70,7 +70,7 @@ class RSIIndicator(Indicator):
             avg_loss = (avg_loss * (period - 1) + l) / period
 
             if avg_loss == 0:
-                rsi[i] = 100.0
+                rsi[i] = 50.0 if avg_gain == 0 else 100.0
             else:
                 rs = avg_gain / avg_loss
                 rsi[i] = 100.0 - (100.0 / (1.0 + rs))

@@ -41,6 +41,7 @@ def configure_logging(settings: AppSettings) -> None:
         level=logging.getLevelName(settings.log_level.upper()),
         format=settings.log_format,
         handlers=handlers,
+        force=True,
     )
 
 

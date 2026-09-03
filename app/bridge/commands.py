@@ -67,8 +67,21 @@ class BridgeCommandHandler(QObject):
     def searchSymbols(self, query: str) -> str:  # camelCase: bridge contract name
         def action() -> Any:
             q = json.loads(query) if query.startswith('"') else query
-            results = self._services.symbol_registry.search(q, limit=20)
-            return [r.as_dict() for r in results]
+            local_results = self._services.symbol_registry.search(q, limit=20)
+            seen = {r.symbol.upper() for r in local_results}
+            merged = [r.as_dict() for r in local_results]
+            try:
+                from app.data.providers.yahoo import search_yahoo
+
+                remote_results = search_yahoo(q, limit=20)
+                for r in remote_results:
+                    sym_upper = r.symbol.upper()
+                    if sym_upper not in seen:
+                        seen.add(sym_upper)
+                        merged.append(r.as_dict())
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("remote symbol search unavailable: %s", exc)
+            return merged[:20]
 
         return self._envelope(action)
 
@@ -281,11 +294,21 @@ class BridgeCommandHandler(QObject):
                     end_s=request.get("end_s"),
                 )
 
-            return self._services.indicator_engine.calculate(
+            res = self._services.indicator_engine.calculate(
                 indicator_name,
                 frame,
                 params=params,
             )
+            last_n = request.get("last_n")
+            if last_n is not None and int(last_n) > 0 and isinstance(res, dict):
+                n = int(last_n)
+                if "timestamps" in res and isinstance(res["timestamps"], list):
+                    res["timestamps"] = res["timestamps"][-n:]
+                if "lines" in res and isinstance(res["lines"], dict):
+                    for k in res["lines"]:
+                        if isinstance(res["lines"][k], list):
+                            res["lines"][k] = res["lines"][k][-n:]
+            return res
 
         return self._envelope(action)
 
@@ -748,6 +771,18 @@ class BridgeCommandHandler(QObject):
 
             candidates = provider_candidates_for(symbol_text)
             if not candidates:
+                try:
+                    from app.data.providers.yahoo import lookup_symbol
+
+                    live_sym = lookup_symbol(symbol_text)
+                    if live_sym is not None:
+                        if hasattr(self._services.symbol_registry, "upsert"):
+                            self._services.symbol_registry.upsert(live_sym)
+                        elif hasattr(self._services.symbol_registry, "register"):
+                            self._services.symbol_registry.register(live_sym)
+                        return live_sym
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("remote symbol lookup failed: %s", exc)
                 raise ValueError(f"Unknown symbol: {symbol_text!r} - not in catalog")
             kind = (
                 AssetClass.CRYPTO

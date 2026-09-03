@@ -20,6 +20,7 @@ const PALETTE = [
 export class IndicatorManager {
   private catalog: IndicatorMetadata[] = [];
   private activeIndicators = new Map<string, ActiveIndicator>();
+  private lineDataCache = new Map<string, { time: number; value: number }[]>();
   private colorIndex = 0;
   private currentSymbol = '';
   private currentTimeframe = '1H';
@@ -54,13 +55,20 @@ export class IndicatorManager {
   }
 
   setContext(symbol: string, timeframe: string): void {
+    if (this.currentSymbol !== symbol || this.currentTimeframe !== timeframe) {
+      this.invalidateCaches();
+    }
     this.currentSymbol = symbol;
     this.currentTimeframe = timeframe;
   }
 
-  async addIndicator(name: string, customParams?: Record<string, unknown>): Promise<void> {
+  invalidateCaches(): void {
+    this.lineDataCache.clear();
+  }
+
+  async addIndicator(name: string, customParams?: Record<string, unknown>): Promise<string | null> {
     const meta = this.catalog.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    if (!meta) return;
+    if (!meta) return null;
 
     const id = `${name}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const params = { ...meta.default_params, ...(customParams || {}) };
@@ -83,17 +91,21 @@ export class IndicatorManager {
     this.activeIndicators.set(id, active);
     this.onActiveChange(this.getActive());
     await this.calculateAndRender(active);
+    return id;
   }
 
   removeIndicator(id: string): void {
     const active = this.activeIndicators.get(id);
     if (!active) return;
 
-    // Remove all associated line series
+    // Remove all associated line series and clear caches
     for (const lineKey of Object.keys(active.colors)) {
-      this.chart.removeIndicatorSeries(`${id}_${lineKey}`);
+      const seriesId = `${id}_${lineKey}`;
+      this.chart.removeIndicatorSeries(seriesId);
+      this.lineDataCache.delete(seriesId);
     }
     this.chart.removeIndicatorSeries(id);
+    this.lineDataCache.delete(id);
 
     this.activeIndicators.delete(id);
     this.onActiveChange(this.getActive());
@@ -115,26 +127,37 @@ export class IndicatorManager {
     this.onActiveChange(this.getActive());
   }
 
-  async recalculateAll(): Promise<void> {
+  async recalculateAll(opts?: { incremental?: boolean }): Promise<void> {
+    const incremental = opts?.incremental ?? false;
     for (const active of this.activeIndicators.values()) {
       if (active.visible) {
-        await this.calculateAndRender(active);
+        await this.calculateAndRender(active, incremental);
       }
     }
   }
 
-  private async calculateAndRender(active: ActiveIndicator): Promise<void> {
+  private async calculateAndRender(active: ActiveIndicator, incremental = false): Promise<void> {
     if (!this.bridge) return;
 
     try {
+      const hasCache = Array.from(this.lineDataCache.keys()).some(
+        (k) => k === active.id || k.startsWith(`${active.id}_`),
+      );
+      const useIncremental = incremental && hasCache;
+
+      const payload: Record<string, unknown> = {
+        indicator_name: active.name,
+        symbol: this.currentSymbol,
+        timeframe: this.currentTimeframe,
+        params: active.params,
+      };
+      if (useIncremental) {
+        payload.last_n = 2;
+      }
+
       const res = await this.bridge.callJson<{ ok: boolean; data?: IndicatorCalculationResult }>(
         'calculateIndicator',
-        {
-          indicator_name: active.name,
-          symbol: this.currentSymbol,
-          timeframe: this.currentTimeframe,
-          params: active.params,
-        },
+        payload,
       );
 
       if (!res.ok || !res.data) return;
@@ -149,14 +172,34 @@ export class IndicatorManager {
         active.colors[lineKey] = color;
 
         const lineValues = result.lines[lineKey];
-        const seriesData: { time: number; value: number }[] = [];
+        const newPoints: { time: number; value: number }[] = [];
 
         for (let i = 0; i < timestamps.length; i++) {
           const val = lineValues[i];
           if (val !== null && val !== undefined) {
-            seriesData.push({ time: timestamps[i], value: val });
+            newPoints.push({ time: timestamps[i], value: val });
           }
         }
+
+        let seriesData: { time: number; value: number }[];
+        const cached = this.lineDataCache.get(seriesId);
+
+        if (useIncremental && cached && cached.length > 0) {
+          const merged = [...cached];
+          for (const pt of newPoints) {
+            const existingIdx = merged.findIndex((m) => m.time === pt.time);
+            if (existingIdx >= 0) {
+              merged[existingIdx] = pt;
+            } else if (merged.length === 0 || pt.time > merged[merged.length - 1].time) {
+              merged.push(pt);
+            }
+          }
+          seriesData = merged;
+        } else {
+          seriesData = newPoints;
+        }
+
+        this.lineDataCache.set(seriesId, seriesData);
 
         const title = lineKeys.length === 1 ? active.display_name : `${active.display_name} (${lineKey})`;
         this.chart.addIndicatorLineSeries(seriesId, color, active.overlay, title);

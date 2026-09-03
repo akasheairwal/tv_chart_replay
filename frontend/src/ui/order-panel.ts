@@ -736,18 +736,20 @@ export class OrderPanel {
       const pipSize = basePrice > 1000 ? 1.0 : basePrice > 50 || this.currentSymbol.includes('JPY') ? 0.01 : 0.0001;
 
       if (slVal !== undefined && !isNaN(slVal) && slVal > 0) {
-        if (basePrice < 50 && slVal >= 1.0 && slVal < 5000) {
-          finalSl = +(side === 'BUY' ? basePrice - slVal * pipSize : basePrice + slVal * pipSize).toFixed(5);
-        } else {
+        const isNearPrice = basePrice > 0 && Math.abs(slVal - basePrice) / basePrice < 0.35;
+        if (isNearPrice || this.slInputMode === 'PRICE') {
           finalSl = slVal;
+        } else {
+          finalSl = +(side === 'BUY' ? basePrice - slVal * pipSize : basePrice + slVal * pipSize).toFixed(5);
         }
       }
 
       if (tpVal !== undefined && !isNaN(tpVal) && tpVal > 0) {
-        if (basePrice < 50 && tpVal >= 1.0 && tpVal < 5000) {
-          finalTp = +(side === 'BUY' ? basePrice + tpVal * pipSize : basePrice - tpVal * pipSize).toFixed(5);
-        } else {
+        const isNearPrice = basePrice > 0 && Math.abs(tpVal - basePrice) / basePrice < 0.35;
+        if (isNearPrice || this.tpInputMode === 'PRICE') {
           finalTp = tpVal;
+        } else {
+          finalTp = +(side === 'BUY' ? basePrice + tpVal * pipSize : basePrice - tpVal * pipSize).toFixed(5);
         }
       }
     }

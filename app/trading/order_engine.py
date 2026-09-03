@@ -78,7 +78,10 @@ class OrderEngine:
         clean_sl = None
         if stop_loss is not None and float(stop_loss) > 0:
             sl_val = float(stop_loss)
-            is_abs_price = abs(sl_val - exec_price) < exec_price * 0.5
+            if exec_price > 0:
+                is_abs_price = (sl_val >= exec_price * 0.1) if exec_price >= 50 else (abs(sl_val - exec_price) < exec_price * 0.5)
+            else:
+                is_abs_price = True
             if is_abs_price:
                 clean_sl = round(sl_val, 5)
             else:
@@ -89,7 +92,10 @@ class OrderEngine:
         clean_tp = None
         if take_profit is not None and float(take_profit) > 0:
             tp_val = float(take_profit)
-            is_abs_price = abs(tp_val - exec_price) < exec_price * 0.5
+            if exec_price > 0:
+                is_abs_price = (tp_val >= exec_price * 0.1) if exec_price >= 50 else (abs(tp_val - exec_price) < exec_price * 0.5)
+            else:
+                is_abs_price = True
             if is_abs_price:
                 clean_tp = round(tp_val, 5)
             else:
@@ -177,7 +183,10 @@ class OrderEngine:
                 if sl_val <= 0:
                     pos.stop_loss = None
                 else:
-                    is_abs = abs(sl_val - exec_price) < exec_price * 0.5
+                    if exec_price > 0:
+                        is_abs = (sl_val >= exec_price * 0.1) if exec_price >= 50 else (abs(sl_val - exec_price) < exec_price * 0.5)
+                    else:
+                        is_abs = True
                     clean_sl = sl_val if is_abs else (exec_price - sl_val * pip_size if side_clean == "BUY" else exec_price + sl_val * pip_size)
                     pos.stop_loss = round(clean_sl, 5)
 
@@ -186,7 +195,10 @@ class OrderEngine:
                 if tp_val <= 0:
                     pos.take_profit = None
                 else:
-                    is_abs = abs(tp_val - exec_price) < exec_price * 0.5
+                    if exec_price > 0:
+                        is_abs = (tp_val >= exec_price * 0.1) if exec_price >= 50 else (abs(tp_val - exec_price) < exec_price * 0.5)
+                    else:
+                        is_abs = True
                     clean_tp = tp_val if is_abs else (exec_price + tp_val * pip_size if side_clean == "BUY" else exec_price - tp_val * pip_size)
                     pos.take_profit = round(clean_tp, 5)
 
@@ -234,7 +246,7 @@ class OrderEngine:
                 if pos.symbol != symbol or pos.status != "OPEN":
                     continue
 
-                pos.update_pnl(close_p)
+                pos.update_pnl(close_p, high_price=high_p, low_price=low_p)
 
                 # Skip SL/TP checks ONLY if tick timestamp is strictly before position opening timestamp
                 if timestamp > 0 and pos.opened_at > 0 and timestamp < pos.opened_at:
@@ -244,7 +256,11 @@ class OrderEngine:
                 if pos.stop_loss is not None and pos.stop_loss > 0:
                     sl_hit = (pos.side == "LONG" and low_p <= pos.stop_loss) or (pos.side == "SHORT" and high_p >= pos.stop_loss)
                     if sl_hit:
-                        record = self._close_position_internal(pos, pos.stop_loss, "STOP_LOSS")
+                        if pos.side == "LONG":
+                            fill_price = min(pos.stop_loss, open_p) if open_p <= pos.stop_loss else pos.stop_loss
+                        else:
+                            fill_price = max(pos.stop_loss, open_p) if open_p >= pos.stop_loss else pos.stop_loss
+                        record = self._close_position_internal(pos, fill_price, "STOP_LOSS")
                         events.append({"event": "position_closed", "reason": "STOP_LOSS", "trade": record})
                         continue
 
@@ -252,7 +268,11 @@ class OrderEngine:
                 if pos.take_profit is not None and pos.take_profit > 0:
                     tp_hit = (pos.side == "LONG" and high_p >= pos.take_profit) or (pos.side == "SHORT" and low_p <= pos.take_profit)
                     if tp_hit:
-                        record = self._close_position_internal(pos, pos.take_profit, "TAKE_PROFIT")
+                        if pos.side == "LONG":
+                            fill_price = max(pos.take_profit, open_p) if open_p >= pos.take_profit else pos.take_profit
+                        else:
+                            fill_price = min(pos.take_profit, open_p) if open_p <= pos.take_profit else pos.take_profit
+                        record = self._close_position_internal(pos, fill_price, "TAKE_PROFIT")
                         events.append({"event": "position_closed", "reason": "TAKE_PROFIT", "trade": record})
                         continue
 

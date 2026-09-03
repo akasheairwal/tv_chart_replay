@@ -84,7 +84,7 @@ class MFIIndicator(Indicator):
             neg_sum = np.sum(neg_flow[i - period + 1 : i + 1])
 
             if neg_sum == 0:
-                mfi[i] = 100.0
+                mfi[i] = 50.0 if pos_sum == 0 else 100.0
             else:
                 mr = pos_sum / neg_sum
                 mfi[i] = 100.0 - (100.0 / (1.0 + mr))

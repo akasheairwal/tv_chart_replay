@@ -917,17 +917,6 @@ export class App {
     if (!this.bridge) return;
 
     // Reload history automatically when background download completes
-    this.bridge.onEvent('dataset.ready', (payload: unknown) => {
-      const data = payload as { symbol?: string; timeframe?: string };
-      if (
-        data &&
-        data.symbol &&
-        data.symbol.toUpperCase() === this.activeSymbol.toUpperCase()
-      ) {
-        void this.loadHistory();
-      }
-    });
-
     this.bridge.onEvent('dataset.updated', (payload: unknown) => {
       const data = payload as { symbol?: string; timeframe?: string };
       if (
@@ -975,6 +964,14 @@ export class App {
         this.showToast(`⚡ Order Filled: ${ord.side} ${ord.quantity} ${ord.symbol} (${ord.order_type})`);
       }
       void this.refreshPositions();
+    });
+
+    this.bridge.onEvent('trading.position_updated', () => {
+      void this.refreshPositions();
+    });
+
+    this.bridge.onEvent('trading.orders', () => {
+      void this.tradingDrawer?.refresh();
     });
   }
 
@@ -1056,7 +1053,7 @@ export class App {
     );
 
     // Start autosave now that a session is active
-    this.sessionMgr.startAutosave(ctx);
+    this.sessionMgr.startAutosave(() => this.getSessionContext());
   }
 
   private async checkAutosave(): Promise<void> {

@@ -101,12 +101,15 @@ export function calculateRiskMetrics(params: RiskCalculationParams): RiskCalcula
       slPips = slValue;
       slPrice = side === 'BUY' ? entryPrice - slPips * pipSize : entryPrice + slPips * pipSize;
     }
-  } else if (slMode === 'CURRENCY') {
-    const targetRisk = Math.max(0.1, slValue);
+  } else if (slMode === 'CURRENCY' || slMode === 'PERCENT') {
+    const targetRisk = slMode === 'PERCENT' ? (Math.max(0.01, slValue) / 100) * safeEquity : Math.max(0.1, slValue);
     riskAmount = targetRisk;
-  } else if (slMode === 'PERCENT') {
-    const targetRisk = (Math.max(0.01, slValue) / 100) * safeEquity;
-    riskAmount = targetRisk;
+    // Derive slPips and slPrice based on standard unit lot size
+    const defaultLots = 1.0;
+    if (pipValuePerLot > 0) {
+      slPips = Math.max(1, riskAmount / (defaultLots * pipValuePerLot));
+      slPrice = side === 'BUY' ? entryPrice - slPips * pipSize : entryPrice + slPips * pipSize;
+    }
   }
 
   // 3. Compute Lot Size

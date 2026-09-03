@@ -107,7 +107,13 @@ class Position:
     closed_at: float | None = None
     status: str = "OPEN"  # "OPEN", "CLOSED"
 
-    def update_pnl(self, market_price: float, pip_size: float | None = None) -> None:
+    def update_pnl(
+        self,
+        market_price: float,
+        pip_size: float | None = None,
+        high_price: float | None = None,
+        low_price: float | None = None,
+    ) -> None:
         self.current_price = market_price
         contract_size, def_pip = get_symbol_contract_details(self.symbol, self.entry_price)
         eff_pip_size = pip_size if pip_size is not None else def_pip
@@ -116,15 +122,17 @@ class Position:
         self.unrealized_pnl = price_diff * self.quantity * multiplier
 
         if self.side == "LONG":
-            if market_price > self.highest_price or self.highest_price == 0.0:
-                self.highest_price = market_price
+            peak = max(market_price, high_price) if high_price is not None else market_price
+            if peak > self.highest_price or self.highest_price == 0.0:
+                self.highest_price = peak
             if self.trailing_stop_pips and self.trailing_stop_pips > 0:
                 new_sl = self.highest_price - (self.trailing_stop_pips * eff_pip_size)
                 if self.stop_loss is None or new_sl > self.stop_loss:
                     self.stop_loss = new_sl
         else:  # SHORT
-            if market_price < self.lowest_price or self.lowest_price == 0.0:
-                self.lowest_price = market_price
+            trough = min(market_price, low_price) if low_price is not None else market_price
+            if trough < self.lowest_price or self.lowest_price == 0.0:
+                self.lowest_price = trough
             if self.trailing_stop_pips and self.trailing_stop_pips > 0:
                 new_sl = self.lowest_price + (self.trailing_stop_pips * eff_pip_size)
                 if self.stop_loss is None or new_sl < self.stop_loss:
