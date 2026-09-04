@@ -1,0 +1,1 @@
+"""Data layer (Wave 1): models, providers, downloader, normalization, validation, storage, registry."""

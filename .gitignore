@@ -16,10 +16,10 @@ frontend/dist/
 .env
 
 # Runtime data (user-local, created on first launch)
-data/
-sessions/
-drawings/
-logs/
+/data/
+/sessions/
+/drawings/
+/logs/
 
 # Editor / OS
 .vscode/
@@ -28,9 +28,8 @@ logs/
 Thumbs.db
 .DS_Store
 
-.scratch/
-scratch/
-tests/
+/.scratch/
+/scratch/
 
 # Agent / Tooling / Local config
 .agents/
@@ -41,3 +40,5 @@ tests/
 .kilocode/
 
 .scripts/
+
+tests/
