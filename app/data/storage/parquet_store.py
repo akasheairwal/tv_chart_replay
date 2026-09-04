@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from app.data.models.candle import CANONICAL_COLUMNS
+from app.data.models.candle import CANONICAL_COLUMNS, empty_frame
 
 
 def _safe_replace(src: Path, dst: Path, max_retries: int = 5) -> None:
@@ -79,4 +79,4 @@ def compute_checksum(path: Path, chunk_size: int = 1 << 20) -> str:
 
 
 def empty_canonical() -> pl.DataFrame:
-    return pl.DataFrame({c: [] for c in CANONICAL_COLUMNS})
+    return empty_frame()

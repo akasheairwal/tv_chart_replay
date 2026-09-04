@@ -18,6 +18,32 @@ from app.trading.models import (
 )
 
 
+def _resolve_target_price(
+    val: float | None,
+    exec_price: float,
+    pip_size: float,
+    side: str,
+    *,
+    is_take_profit: bool,
+) -> float | None:
+    if val is None:
+        return None
+    val_float = float(val)
+    if val_float <= 0:
+        return None
+    if exec_price > 0:
+        is_abs = (val_float >= exec_price * 0.1) if exec_price >= 50 else (abs(val_float - exec_price) < exec_price * 0.5)
+    else:
+        is_abs = True
+    if is_abs:
+        return round(val_float, 5)
+    if is_take_profit:
+        target = exec_price + (val_float * pip_size) if side == "BUY" else exec_price - (val_float * pip_size)
+    else:
+        target = exec_price - (val_float * pip_size) if side == "BUY" else exec_price + (val_float * pip_size)
+    return round(target, 5)
+
+
 class OrderEngine:
     """Executes paper orders on replay ticks and tracks live positions and account summary."""
 
@@ -74,33 +100,8 @@ class OrderEngine:
         exec_price = current_market_price if current_market_price > 0 else self._latest_prices.get(sym_clean, price)
         pip_size = get_pip_size(sym_clean, exec_price)
 
-        # 1. Resolve SL Target Price (absolute price vs pips distance)
-        clean_sl = None
-        if stop_loss is not None and float(stop_loss) > 0:
-            sl_val = float(stop_loss)
-            if exec_price > 0:
-                is_abs_price = (sl_val >= exec_price * 0.1) if exec_price >= 50 else (abs(sl_val - exec_price) < exec_price * 0.5)
-            else:
-                is_abs_price = True
-            if is_abs_price:
-                clean_sl = round(sl_val, 5)
-            else:
-                # Interpret as distance in pips
-                clean_sl = round(exec_price - (sl_val * pip_size) if side_clean == "BUY" else exec_price + (sl_val * pip_size), 5)
-
-        # 2. Resolve TP Target Price (absolute price vs pips distance)
-        clean_tp = None
-        if take_profit is not None and float(take_profit) > 0:
-            tp_val = float(take_profit)
-            if exec_price > 0:
-                is_abs_price = (tp_val >= exec_price * 0.1) if exec_price >= 50 else (abs(tp_val - exec_price) < exec_price * 0.5)
-            else:
-                is_abs_price = True
-            if is_abs_price:
-                clean_tp = round(tp_val, 5)
-            else:
-                # Interpret as distance in pips
-                clean_tp = round(exec_price + (tp_val * pip_size) if side_clean == "BUY" else exec_price - (tp_val * pip_size), 5)
+        clean_sl = _resolve_target_price(stop_loss, exec_price, pip_size, side_clean, is_take_profit=False)
+        clean_tp = _resolve_target_price(take_profit, exec_price, pip_size, side_clean, is_take_profit=True)
 
         exec_timestamp = timestamp if timestamp > 0 else (self._current_replay_timestamp if self._current_replay_timestamp > 0 else time.time())
 
@@ -179,28 +180,10 @@ class OrderEngine:
             pip_size = get_pip_size(pos.symbol, exec_price)
 
             if stop_loss is not None:
-                sl_val = float(stop_loss)
-                if sl_val <= 0:
-                    pos.stop_loss = None
-                else:
-                    if exec_price > 0:
-                        is_abs = (sl_val >= exec_price * 0.1) if exec_price >= 50 else (abs(sl_val - exec_price) < exec_price * 0.5)
-                    else:
-                        is_abs = True
-                    clean_sl = sl_val if is_abs else (exec_price - sl_val * pip_size if side_clean == "BUY" else exec_price + sl_val * pip_size)
-                    pos.stop_loss = round(clean_sl, 5)
+                pos.stop_loss = _resolve_target_price(stop_loss, exec_price, pip_size, side_clean, is_take_profit=False)
 
             if take_profit is not None:
-                tp_val = float(take_profit)
-                if tp_val <= 0:
-                    pos.take_profit = None
-                else:
-                    if exec_price > 0:
-                        is_abs = (tp_val >= exec_price * 0.1) if exec_price >= 50 else (abs(tp_val - exec_price) < exec_price * 0.5)
-                    else:
-                        is_abs = True
-                    clean_tp = tp_val if is_abs else (exec_price + tp_val * pip_size if side_clean == "BUY" else exec_price - tp_val * pip_size)
-                    pos.take_profit = round(clean_tp, 5)
+                pos.take_profit = _resolve_target_price(take_profit, exec_price, pip_size, side_clean, is_take_profit=True)
 
             res = pos.to_dict()
 

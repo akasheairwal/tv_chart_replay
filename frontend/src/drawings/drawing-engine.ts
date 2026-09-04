@@ -4,6 +4,7 @@ import type { CompactCandleRow } from '../chart/candle-series';
 import {
   calculateParallelChannel,
   calculatePitchfork,
+  calculatePositionHandleCoords,
   calculatePositionMetrics,
   constrainPointAngle,
   distanceToPoint,
@@ -1837,16 +1838,12 @@ export class DrawingEngine {
       if (!p1) return -1;
 
       const metrics = calculatePositionMetrics(d.type, d.points, d.style);
-      const tpPixel = this.chartToPixel({ timestamp: d.points[0].timestamp, price: metrics.tpPrice });
-      const slPixel = this.chartToPixel({ timestamp: d.points[0].timestamp, price: metrics.slPrice });
-      const endPixel = this.chartToPixel({ timestamp: metrics.endTimestamp, price: metrics.entryPrice });
-
-      const leftX = p1.x;
-      const rightX = Math.max(leftX + 5, endPixel?.x ?? (leftX + 30));
-      const midX = (leftX + rightX) / 2;
-
-      const tpY = tpPixel?.y ?? (metrics.isLong ? p1.y - 60 : p1.y + 60);
-      const slY = slPixel?.y ?? (metrics.isLong ? p1.y + 30 : p1.y - 30);
+      const { leftX, rightX, midX, tpY, slY } = calculatePositionHandleCoords(
+        p1,
+        metrics,
+        (pt) => this.chartToPixel(pt),
+        d.points[0].timestamp,
+      );
 
       // Handle 0: Entry Anchor (left edge center)
       if (distanceToPoint(px, py, leftX, p1.y) <= 10) return 0;

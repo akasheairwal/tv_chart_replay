@@ -6,6 +6,7 @@ import {
   GANN_FAN_RATIOS,
   calculateParallelChannel,
   calculatePitchfork,
+  calculatePositionHandleCoords,
   calculatePositionMetrics,
   drawCatmullRomSpline,
   formatCrosshairPrice,
@@ -20,20 +21,24 @@ export interface RenderContext {
   ctx: CanvasRenderingContext2D;
   canvasWidth: number;
   canvasHeight: number;
-  chartToPixel: (point: DrawingPoint) => { x: number; y: number } | null;
+  chartToPixel: (pt: DrawingPoint) => { x: number; y: number } | null;
   pixelToChart: (x: number, y: number) => DrawingPoint | null;
-  getBarStats?: (
-    t1: number,
-    t2: number,
-    p1?: number,
-    p2?: number,
-  ) => {
-    barCount: number;
-    durationSec: number;
-    durationText: string;
-    totalVolume: number;
-    volumeText: string;
-  };
+  getBarStats?: (t1: number, t2: number, p1?: number, p2?: number) => { barCount: number; durationText: string; volumeText?: string } | null;
+}
+
+function resolveBarStats(
+  t1: number,
+  t2: number,
+  p1?: number,
+  p2?: number,
+  getBarStats?: (t1: number, t2: number, p1?: number, p2?: number) => { barCount: number; durationText: string; volumeText?: string } | null,
+): { barCount: number; durText: string; volText: string } {
+  const deltaT = t2 - t1;
+  const stats = getBarStats ? getBarStats(t1, t2, p1, p2) : null;
+  const barCount = stats ? stats.barCount : Math.max(1, Math.round(Math.abs(deltaT) / 3600));
+  const durText = stats ? stats.durationText : formatDuration(deltaT);
+  const volText = stats?.volumeText ? ` · Vol ${stats.volumeText}` : '';
+  return { barCount, durText, volText };
 }
 
 export function renderDrawingOnCanvas(
@@ -578,13 +583,13 @@ export function renderDrawingOnCanvas(
         ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
         ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
-        const deltaT = d.points[1].timestamp - d.points[0].timestamp;
-        const stats = getBarStats
-          ? getBarStats(d.points[0].timestamp, d.points[1].timestamp, d.points[0].price, d.points[1].price)
-          : null;
-        const barCount = stats ? stats.barCount : Math.max(1, Math.round(Math.abs(deltaT) / 3600));
-        const durText = stats ? stats.durationText : formatDuration(deltaT);
-        const volText = stats?.volumeText ? ` · Vol ${stats.volumeText}` : '';
+        const { barCount, durText, volText } = resolveBarStats(
+          d.points[0].timestamp,
+          d.points[1].timestamp,
+          d.points[0].price,
+          d.points[1].price,
+          getBarStats,
+        );
 
         // Center card
         const cardW = 180;
@@ -612,13 +617,13 @@ export function renderDrawingOnCanvas(
 
     case 'date_range': {
       if (p2) {
-        const deltaSec = d.points[1].timestamp - d.points[0].timestamp;
-        const stats = getBarStats
-          ? getBarStats(d.points[0].timestamp, d.points[1].timestamp)
-          : null;
-        const barCount = stats ? stats.barCount : Math.max(1, Math.round(Math.abs(deltaSec) / 3600));
-        const durText = stats ? stats.durationText : formatDuration(deltaSec);
-        const volText = stats?.volumeText ? ` · Vol ${stats.volumeText}` : '';
+        const { barCount, durText, volText } = resolveBarStats(
+          d.points[0].timestamp,
+          d.points[1].timestamp,
+          undefined,
+          undefined,
+          getBarStats,
+        );
 
         const minX = Math.min(p1.x, p2.x);
         const maxX = Math.max(p1.x, p2.x);
@@ -654,12 +659,13 @@ export function renderDrawingOnCanvas(
 
     case 'bars_count': {
       if (p2) {
-        const deltaSec = d.points[1].timestamp - d.points[0].timestamp;
-        const stats = getBarStats
-          ? getBarStats(d.points[0].timestamp, d.points[1].timestamp)
-          : null;
-        const barCount = stats ? stats.barCount : Math.max(1, Math.round(Math.abs(deltaSec) / 3600));
-        const durText = stats ? stats.durationText : formatDuration(deltaSec);
+        const { barCount, durText } = resolveBarStats(
+          d.points[0].timestamp,
+          d.points[1].timestamp,
+          undefined,
+          undefined,
+          getBarStats,
+        );
 
         const minX = Math.min(p1.x, p2.x);
         const maxX = Math.max(p1.x, p2.x);
@@ -688,15 +694,15 @@ export function renderDrawingOnCanvas(
     case 'measurement': {
       if (p2) {
         const deltaP = d.points[1].price - d.points[0].price;
-        const deltaT = d.points[1].timestamp - d.points[0].timestamp;
         const { text, pctText, pipsText, isPositive } = formatPriceChange(deltaP, d.points[0].price);
 
-        const stats = getBarStats
-          ? getBarStats(d.points[0].timestamp, d.points[1].timestamp, d.points[0].price, d.points[1].price)
-          : null;
-        const barCount = stats ? stats.barCount : Math.max(1, Math.round(Math.abs(deltaT) / 3600));
-        const durText = stats ? stats.durationText : formatDuration(deltaT);
-        const volText = stats?.volumeText ? ` · Vol ${stats.volumeText}` : '';
+        const { barCount, durText, volText } = resolveBarStats(
+          d.points[0].timestamp,
+          d.points[1].timestamp,
+          d.points[0].price,
+          d.points[1].price,
+          getBarStats,
+        );
 
         const minX = Math.min(p1.x, p2.x);
         const maxX = Math.max(p1.x, p2.x);
@@ -992,16 +998,12 @@ export function renderDrawingOnCanvas(
   if (isSelected) {
     if (d.type === 'long_position' || d.type === 'short_position') {
       const metrics = calculatePositionMetrics(d.type, d.points, d.style);
-      const tpPixel = chartToPixel({ timestamp: d.points[0].timestamp, price: metrics.tpPrice });
-      const slPixel = chartToPixel({ timestamp: d.points[0].timestamp, price: metrics.slPrice });
-      const endPixel = chartToPixel({ timestamp: metrics.endTimestamp, price: metrics.entryPrice });
-
-      const leftX = p1.x;
-      const rightX = Math.max(leftX + 5, endPixel?.x ?? (leftX + 30));
-      const midX = (leftX + rightX) / 2;
-
-      const tpY = tpPixel?.y ?? (metrics.isLong ? p1.y - 60 : p1.y + 60);
-      const slY = slPixel?.y ?? (metrics.isLong ? p1.y + 30 : p1.y - 30);
+      const { leftX, rightX, midX, tpY, slY } = calculatePositionHandleCoords(
+        p1,
+        metrics,
+        chartToPixel,
+        d.points[0].timestamp,
+      );
 
       const handles = [
         { x: leftX, y: p1.y, color: '#2962ff', title: 'Entry Anchor' },

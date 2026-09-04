@@ -11,7 +11,7 @@ import polars as pl
 import requests
 
 from app.data.errors import ProviderRateLimitError, ProviderUnavailableError
-from app.data.models.candle import CANONICAL_COLUMNS
+from app.data.models.candle import CANONICAL_COLUMNS, empty_frame
 from app.data.models.symbol import AssetClass, Symbol
 from app.data.models.timeframe import Timeframe
 
@@ -101,7 +101,7 @@ class BinanceProvider(DataProvider):
 
         progress(1.0, f"{len(rows)} candles downloaded")
         if not rows:
-            return pl.DataFrame({c: [] for c in CANONICAL_COLUMNS})
+            return empty_frame()
         return pl.DataFrame(
             rows,
             schema=[(c, pl.Int64 if c == "timestamp" else pl.Float64) for c in CANONICAL_COLUMNS],

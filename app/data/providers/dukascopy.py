@@ -14,7 +14,7 @@ import polars as pl
 import requests
 
 from app.data.errors import ProviderUnavailableError
-from app.data.models.candle import CANONICAL_COLUMNS
+from app.data.models.candle import empty_frame
 from app.data.models.symbol import AssetClass, Symbol
 from app.data.models.timeframe import Timeframe
 from app.data.normalization.resampler import resample
@@ -179,7 +179,7 @@ class DukascopyProvider(DataProvider):
 
         if not all_rows:
             progress(1.0, "no data returned")
-            return pl.DataFrame({c: [] for c in CANONICAL_COLUMNS})
+            return empty_frame()
 
         # Deduplicate by timestamp_ms
         seen_ts = set()

@@ -118,29 +118,8 @@ export class SlTpConfirmDialog {
     if (editForm) editForm.style.display = 'none';
 
     const { position, type, originalPrice, newPrice } = req;
-    const isLong = position.side === 'LONG' || (position.side as any) === 'BUY';
-    const isCrypto = position.entry_price > 1000;
-    const isJpy = position.symbol.includes('JPY');
-    const pipSize = isCrypto ? 1.0 : isJpy ? 0.01 : 0.0001;
-    const multiplier = position.entry_price < 50 && position.quantity <= 100 ? 100000.0 : 1.0;
-
-    const formatPrice = (val: number) => {
-      if (!val || val <= 0) return 'None';
-      return isCrypto ? val.toFixed(2) : isJpy ? val.toFixed(3) : val.toFixed(5);
-    };
-
-    const symEl = this.backdrop.querySelector('#sltp-sym');
-    const sideEl = this.backdrop.querySelector('#sltp-side');
-    const lotsEl = this.backdrop.querySelector('#sltp-lots');
-    const entryEl = this.backdrop.querySelector('#sltp-entry');
-
-    if (symEl) symEl.textContent = position.symbol;
-    if (sideEl) {
-      sideEl.textContent = isLong ? 'BUY' : 'SELL';
-      sideEl.className = `sltp-side-badge ${isLong ? 'long' : 'short'}`;
-    }
-    if (lotsEl) lotsEl.textContent = `${position.quantity.toFixed(2)} Lots`;
-    if (entryEl) entryEl.textContent = `@ ${formatPrice(position.entry_price)}`;
+    const { isLong, pipSize, multiplier, formatPrice } = this.getSymbolParams(position);
+    this.populatePositionHeader(position, formatPrice, isLong);
 
     const paramLabel = this.backdrop.querySelector('#sltp-param-label');
     const oldPriceEl = this.backdrop.querySelector('#sltp-old-price');
@@ -205,27 +184,8 @@ export class SlTpConfirmDialog {
     if (paramCard) paramCard.style.display = 'none';
     if (editForm) editForm.style.display = 'flex';
 
-    const isLong = position.side === 'LONG' || (position.side as any) === 'BUY';
-    const isCrypto = position.entry_price > 1000;
-    const isJpy = position.symbol.includes('JPY');
-
-    const formatPrice = (val?: number | null) => {
-      if (!val || val <= 0) return '';
-      return isCrypto ? val.toFixed(2) : isJpy ? val.toFixed(3) : val.toFixed(5);
-    };
-
-    const symEl = this.backdrop.querySelector('#sltp-sym');
-    const sideEl = this.backdrop.querySelector('#sltp-side');
-    const lotsEl = this.backdrop.querySelector('#sltp-lots');
-    const entryEl = this.backdrop.querySelector('#sltp-entry');
-
-    if (symEl) symEl.textContent = position.symbol;
-    if (sideEl) {
-      sideEl.textContent = isLong ? 'BUY' : 'SELL';
-      sideEl.className = `sltp-side-badge ${isLong ? 'long' : 'short'}`;
-    }
-    if (lotsEl) lotsEl.textContent = `${position.quantity.toFixed(2)} Lots`;
-    if (entryEl) entryEl.textContent = `@ ${position.entry_price.toFixed(4)}`;
+    const { isLong, formatPrice } = this.getSymbolParams(position);
+    this.populatePositionHeader(position, formatPrice, isLong);
 
     const slInput = this.backdrop.querySelector<HTMLInputElement>('#sltp-sl-input');
     const tpInput = this.backdrop.querySelector<HTMLInputElement>('#sltp-tp-input');
@@ -247,11 +207,40 @@ export class SlTpConfirmDialog {
     this.currentReq = null;
   }
 
-  private updateEditHints(position: PositionDefinition): void {
+  private getSymbolParams(position: PositionDefinition) {
+    const isLong = position.side === 'LONG' || (position.side as any) === 'BUY';
     const isCrypto = position.entry_price > 1000;
     const isJpy = position.symbol.includes('JPY');
     const pipSize = isCrypto ? 1.0 : isJpy ? 0.01 : 0.0001;
     const multiplier = position.entry_price < 50 && position.quantity <= 100 ? 100000.0 : 1.0;
+    const formatPrice = (val?: number | null, fallback = '') => {
+      if (!val || val <= 0) return fallback;
+      return isCrypto ? val.toFixed(2) : isJpy ? val.toFixed(3) : val.toFixed(5);
+    };
+    return { isLong, isCrypto, isJpy, pipSize, multiplier, formatPrice };
+  }
+
+  private populatePositionHeader(
+    position: PositionDefinition,
+    formatPrice: (v?: number | null, fallback?: string) => string,
+    isLong: boolean,
+  ): void {
+    const symEl = this.backdrop.querySelector('#sltp-sym');
+    const sideEl = this.backdrop.querySelector('#sltp-side');
+    const lotsEl = this.backdrop.querySelector('#sltp-lots');
+    const entryEl = this.backdrop.querySelector('#sltp-entry');
+
+    if (symEl) symEl.textContent = position.symbol;
+    if (sideEl) {
+      sideEl.textContent = isLong ? 'BUY' : 'SELL';
+      sideEl.className = `sltp-side-badge ${isLong ? 'long' : 'short'}`;
+    }
+    if (lotsEl) lotsEl.textContent = `${position.quantity.toFixed(2)} Lots`;
+    if (entryEl) entryEl.textContent = `@ ${formatPrice(position.entry_price)}`;
+  }
+
+  private updateEditHints(position: PositionDefinition): void {
+    const { pipSize, multiplier } = this.getSymbolParams(position);
 
     const slInput = this.backdrop.querySelector<HTMLInputElement>('#sltp-sl-input');
     const tpInput = this.backdrop.querySelector<HTMLInputElement>('#sltp-tp-input');

@@ -273,12 +273,7 @@ export class ReplayController {
       'replayPrevious',
       step.toString(),
     );
-    if (res.ok && res.data) {
-      this.currentState = res.data.state;
-      this.activeSpeed = res.data.state.speed;
-      this.chart.loadHistory(res.data.candles);
-      this.onStateChange(this.currentState);
-    }
+    this.applyReplayResponse(res);
   }
 
   async jumpTo(target: number): Promise<void> {
@@ -307,12 +302,7 @@ export class ReplayController {
       'replayJumpTo',
       target.toString(),
     );
-    if (res.ok && res.data) {
-      this.currentState = res.data.state;
-      this.activeSpeed = res.data.state.speed;
-      this.chart.loadHistory(res.data.candles);
-      this.onStateChange(this.currentState);
-    }
+    this.applyReplayResponse(res);
   }
 
   async reset(): Promise<void> {
@@ -336,12 +326,7 @@ export class ReplayController {
       'replayReset',
       {},
     );
-    if (res.ok && res.data) {
-      this.currentState = res.data.state;
-      this.activeSpeed = res.data.state.speed;
-      this.chart.loadHistory(res.data.candles);
-      this.onStateChange(this.currentState);
-    }
+    this.applyReplayResponse(res);
   }
 
   async setSpeed(speed: number): Promise<void> {
@@ -396,36 +381,27 @@ export class ReplayController {
       }
     });
 
-    this.bridge.onEvent('replay.state', (payload: unknown) => {
+    const handleState = (payload: unknown) => {
       const state = payload as ReplayState;
       if (state) {
         this.currentState = state;
         this.onStateChange(state);
       }
-    });
+    };
 
-    this.bridge.onEvent('replay.paused', (payload: unknown) => {
-      const state = payload as ReplayState;
-      if (state) {
-        this.currentState = state;
-        this.onStateChange(state);
-      }
-    });
+    this.bridge.onEvent('replay.state', handleState);
+    this.bridge.onEvent('replay.paused', handleState);
+    this.bridge.onEvent('replay.started', handleState);
+    this.bridge.onEvent('replay.finished', handleState);
+  }
 
-    this.bridge.onEvent('replay.started', (payload: unknown) => {
-      const state = payload as ReplayState;
-      if (state) {
-        this.currentState = state;
-        this.onStateChange(state);
-      }
-    });
-
-    this.bridge.onEvent('replay.finished', (payload: unknown) => {
-      const state = payload as ReplayState;
-      if (state) {
-        this.currentState = state;
-        this.onStateChange(state);
-      }
-    });
+  private applyReplayResponse(res: ReplayResponse<{ state: ReplayState; candles: CompactCandleRow[] }>): void {
+    if (res.ok && res.data) {
+      this.currentState = res.data.state;
+      this.activeSpeed = res.data.state.speed;
+      this.chart.loadHistory(res.data.candles);
+      this.onStateChange(this.currentState);
+    }
   }
 }
+

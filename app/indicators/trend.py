@@ -7,7 +7,11 @@ from typing import Any, ClassVar
 import numpy as np
 import polars as pl
 
-from app.indicators.base import Indicator
+from app.indicators.base import Indicator, calc_atr, calc_ema, to_clean_list
+
+_to_clean_list = to_clean_list
+_calc_ema = calc_ema
+_calc_atr = calc_atr
 
 
 def _get_series(frame: pl.DataFrame, source: str = "close") -> np.ndarray:
@@ -15,13 +19,6 @@ def _get_series(frame: pl.DataFrame, source: str = "close") -> np.ndarray:
     if col not in frame.columns:
         col = "close"
     return frame[col].to_numpy()
-
-
-def _to_clean_list(arr: np.ndarray) -> list[float | None]:
-    isnan = math.isnan
-    round_ = round
-    float_ = float
-    return [None if isnan(v) else round_(float_(v), 6) for v in arr]
 
 
 def _calc_wma(data: np.ndarray, period: int) -> np.ndarray:
@@ -85,17 +82,8 @@ class EMAIndicator(Indicator):
         p = {**self.default_params, **(params or {})}
         period = int(p["period"])
         data = _get_series(frame, p["source"])
-        n = len(data)
-
-        out = np.full(n, np.nan, dtype=np.float64)
-        if n >= period > 0:
-            alpha = 2.0 / (period + 1.0)
-            # Seed with SMA
-            out[period - 1] = np.mean(data[:period])
-            for i in range(period, n):
-                out[i] = alpha * data[i] + (1.0 - alpha) * out[i - 1]
-
-        return {"value": _to_clean_list(out)}
+        out = calc_ema(data, period)
+        return {"value": to_clean_list(out)}
 
 
 class WMAIndicator(Indicator):
@@ -197,21 +185,7 @@ class SupertrendIndicator(Indicator):
         high = frame["high"].to_numpy()
         low = frame["low"].to_numpy()
         close = frame["close"].to_numpy()
-
-        # True Range
-        tr = np.empty(n, dtype=np.float64)
-        tr[0] = high[0] - low[0]
-        if n > 1:
-            hl = high[1:] - low[1:]
-            hc = np.abs(high[1:] - close[:-1])
-            lc = np.abs(low[1:] - close[:-1])
-            tr[1:] = np.maximum(hl, np.maximum(hc, lc))
-
-        # ATR (Wilder)
-        atr = np.zeros(n, dtype=np.float64)
-        atr[period - 1] = np.mean(tr[:period])
-        for i in range(period, n):
-            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+        atr = calc_atr(high, low, close, period)
 
         hl2 = (high + low) / 2.0
         upper_band = hl2 + (multiplier * atr)

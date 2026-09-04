@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 
 from app.data.errors import ProviderUnavailableError
-from app.data.models.candle import CANONICAL_COLUMNS
+from app.data.models.candle import empty_frame
 from app.data.models.symbol import AssetClass, Symbol, SymbolSearchResult
 from app.data.models.timeframe import Timeframe
 from app.data.normalization.resampler import resample
@@ -268,7 +268,7 @@ class YahooProvider(DataProvider):
 
         if ys is None or ys.empty:
             progress(1.0, "no data returned")
-            return pl.DataFrame({c: [] for c in CANONICAL_COLUMNS})
+            return empty_frame()
 
         frame = self._to_canonical(ys)
 
@@ -279,7 +279,7 @@ class YahooProvider(DataProvider):
         )
         if frame.height == 0:
             progress(1.0, "no data returned within requested range")
-            return pl.DataFrame({c: [] for c in CANONICAL_COLUMNS})
+            return empty_frame()
         progress(0.85, f"{frame.height} source candles")
 
         if source_freq != timeframe.freq:

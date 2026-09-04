@@ -553,4 +553,32 @@ export function drawCatmullRomSpline(
   }
 }
 
+export interface PositionHandleCoords {
+  leftX: number;
+  rightX: number;
+  midX: number;
+  tpY: number;
+  slY: number;
+}
+
+export function calculatePositionHandleCoords(
+  p1: { x: number; y: number },
+  metrics: PositionMetrics,
+  chartToPixel: (pt: { timestamp: number; price: number }) => { x: number; y: number } | null,
+  t0: number,
+): PositionHandleCoords {
+  const tpPixel = chartToPixel({ timestamp: t0, price: metrics.tpPrice });
+  const slPixel = chartToPixel({ timestamp: t0, price: metrics.slPrice });
+  const endPixel = chartToPixel({ timestamp: metrics.endTimestamp, price: metrics.entryPrice });
+
+  const leftX = p1.x;
+  const rightX = Math.max(leftX + 5, endPixel?.x ?? (leftX + 30));
+  const midX = (leftX + rightX) / 2;
+
+  const tpY = tpPixel?.y ?? (metrics.isLong ? p1.y - 60 : p1.y + 60);
+  const slY = slPixel?.y ?? (metrics.isLong ? p1.y + 30 : p1.y - 30);
+
+  return { leftX, rightX, midX, tpY, slY };
+}
+
 

@@ -1,31 +1,15 @@
 """Momentum indicators: RSI, MACD, Stochastic (architecture ``#41``)."""
 from __future__ import annotations
 
-import math
 from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
 
-from app.indicators.base import Indicator
+from app.indicators.base import Indicator, calc_ema, to_clean_list
 
-
-def _to_clean_list(arr: np.ndarray) -> list[float | None]:
-    isnan = math.isnan
-    round_ = round
-    float_ = float
-    return [None if isnan(v) else round_(float_(v), 6) for v in arr]
-
-
-def _calc_ema(data: np.ndarray, period: int) -> np.ndarray:
-    n = len(data)
-    out = np.full(n, np.nan, dtype=np.float64)
-    if n >= period > 0:
-        alpha = 2.0 / (period + 1.0)
-        out[period - 1] = np.mean(data[:period])
-        for i in range(period, n):
-            out[i] = alpha * data[i] + (1.0 - alpha) * out[i - 1]
-    return out
+_to_clean_list = to_clean_list
+_calc_ema = calc_ema
 
 
 class RSIIndicator(Indicator):

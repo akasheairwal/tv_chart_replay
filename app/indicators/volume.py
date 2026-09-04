@@ -1,20 +1,14 @@
 """Volume indicators: OBV, MFI (architecture ``#41``)."""
 from __future__ import annotations
 
-import math
 from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
 
-from app.indicators.base import Indicator
+from app.indicators.base import Indicator, to_clean_list
 
-
-def _to_clean_list(arr: np.ndarray) -> list[float | None]:
-    isnan = math.isnan
-    round_ = round
-    float_ = float
-    return [None if isnan(v) else round_(float_(v), 6) for v in arr]
+_to_clean_list = to_clean_list
 
 
 class OBVIndicator(Indicator):

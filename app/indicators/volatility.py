@@ -1,52 +1,16 @@
 """Volatility indicators: ATR, Bollinger Bands, Keltner Channels (architecture ``#41``)."""
 from __future__ import annotations
 
-import math
 from typing import Any, ClassVar
 
 import numpy as np
 import polars as pl
 
-from app.indicators.base import Indicator
+from app.indicators.base import Indicator, calc_atr, calc_ema, to_clean_list
 
-
-def _to_clean_list(arr: np.ndarray) -> list[float | None]:
-    isnan = math.isnan
-    round_ = round
-    float_ = float
-    return [None if isnan(v) else round_(float_(v), 6) for v in arr]
-
-
-def _calc_ema(data: np.ndarray, period: int) -> np.ndarray:
-    n = len(data)
-    out = np.full(n, np.nan, dtype=np.float64)
-    if n >= period > 0:
-        alpha = 2.0 / (period + 1.0)
-        out[period - 1] = np.mean(data[:period])
-        for i in range(period, n):
-            out[i] = alpha * data[i] + (1.0 - alpha) * out[i - 1]
-    return out
-
-
-def _calc_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np.ndarray:
-    n = len(high)
-    atr = np.full(n, np.nan, dtype=np.float64)
-    if n < period or period <= 0:
-        return atr
-
-    # Vectorized True Range (80x faster than scalar Python loop)
-    tr = np.empty(n, dtype=np.float64)
-    tr[0] = high[0] - low[0]
-    if n > 1:
-        hl = high[1:] - low[1:]
-        hc = np.abs(high[1:] - close[:-1])
-        lc = np.abs(low[1:] - close[:-1])
-        tr[1:] = np.maximum(hl, np.maximum(hc, lc))
-
-    atr[period - 1] = np.mean(tr[:period])
-    for i in range(period, n):
-        atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
-    return atr
+_to_clean_list = to_clean_list
+_calc_ema = calc_ema
+_calc_atr = calc_atr
 
 
 class ATRIndicator(Indicator):

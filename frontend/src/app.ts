@@ -2,6 +2,7 @@ import type { PythonBridge } from './bridge/python-bridge';
 import { ChartManager } from './chart/chart-manager';
 import type { CompactCandleRow } from './chart/candle-series';
 import type { DrawingDefinition } from './drawings/drawing-types';
+import { getTimeframeSeconds } from './drawings/drawing-engine';
 import { IndicatorManager } from './indicators/indicator-manager';
 import { ReplayBar } from './replay/replay-bar';
 import { ReplayController, type ReplayState } from './replay/replay-controller';
@@ -39,27 +40,6 @@ interface LoadHistoryResponse {
   error?: string;
 }
 
-function getTimeframeSeconds(tf: string): number {
-  const map: Record<string, number> = {
-    '1m': 60,
-    '2m': 120,
-    '3m': 180,
-    '5m': 300,
-    '10m': 600,
-    '15m': 900,
-    '30m': 1800,
-    '45m': 2700,
-    '1H': 3600,
-    '2H': 7200,
-    '4H': 14400,
-    '6H': 21600,
-    '12H': 43200,
-    '1D': 86400,
-    '1W': 604800,
-    '1M': 2592000,
-  };
-  return map[tf] || 3600;
-}
 
 function requireElement<T extends HTMLElement = HTMLElement>(selector: string): T {
   let el = document.querySelector<T>(selector);
