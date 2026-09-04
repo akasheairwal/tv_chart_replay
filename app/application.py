@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import QObject, Signal
 
@@ -65,6 +68,14 @@ class ApplicationContext:
     def close(self) -> None:
         self.replay_engine.pause()
         self.download_manager.wait()
+        try:
+            self.watchlist_manager.close()
+        except sqlite3.Error as exc:
+            logger.debug("Error closing watchlist manager: %s", exc)
+        try:
+            self.trade_journal.close()
+        except sqlite3.Error as exc:
+            logger.debug("Error closing trade journal: %s", exc)
         self.conn.close()
 
 

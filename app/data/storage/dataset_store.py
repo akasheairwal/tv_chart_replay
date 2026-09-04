@@ -53,12 +53,17 @@ class DatasetStore:
         path = self.parquet_path_for(symbol, timeframe, asset)
 
         existing = self.load_all(symbol, timeframe)
-        combined = pl.concat([existing, frame]) if existing.height else frame
-        combined = (
-            combined.sort("timestamp", maintain_order=True)
-            .unique(subset=["timestamp"], keep="last")
-            .sort("timestamp")
-        )
+        if existing.height:
+            combined = (
+                pl.concat([existing, frame])
+                .unique(subset=["timestamp"], keep="last")
+                .sort("timestamp")
+            )
+        else:
+            combined = (
+                frame.unique(subset=["timestamp"], keep="last")
+                .sort("timestamp")
+            )
 
         size = parquet_store.write_dataframe(path, combined)
         checksum = parquet_store.compute_checksum(path)

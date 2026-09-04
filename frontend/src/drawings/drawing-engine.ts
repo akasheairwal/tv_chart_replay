@@ -125,6 +125,8 @@ export class DrawingEngine {
     dataVersion: number;
     result: ReturnType<DrawingEngine['getBarStats']>;
   } | null = null;
+  private cachedPriceRange: { minP: number; maxP: number; dataVersion: number } | null = null;
+  private redrawRafId: number | null = null;
   private dataVersion = 0;
   public onOpenDrawingSettings?: (drawing: DrawingDefinition) => void;
 
@@ -525,13 +527,20 @@ export class DrawingEngine {
     }
 
     if (y === null && this.candleData.length > 0) {
-      let minP = Infinity;
-      let maxP = -Infinity;
-      for (let i = 0; i < this.candleData.length; i++) {
-        const c = this.candleData[i];
-        if (c[3] < minP) minP = c[3];
-        if (c[2] > maxP) maxP = c[2];
+      if (
+        !this.cachedPriceRange ||
+        this.cachedPriceRange.dataVersion !== this.dataVersion
+      ) {
+        let minP = Infinity;
+        let maxP = -Infinity;
+        for (let i = 0; i < this.candleData.length; i++) {
+          const c = this.candleData[i];
+          if (c[3] < minP) minP = c[3];
+          if (c[2] > maxP) maxP = c[2];
+        }
+        this.cachedPriceRange = { minP, maxP, dataVersion: this.dataVersion };
       }
+      const { minP, maxP } = this.cachedPriceRange;
       if (maxP > minP && isFinite(minP) && isFinite(maxP)) {
         const pad = (maxP - minP) * 0.08;
         const pMin = minP - pad;
@@ -1841,7 +1850,29 @@ export class DrawingEngine {
 
   // -- Rendering ----------------------------------------------------
 
+  /**
+   * Schedule a redraw on the next animation frame.
+   * Coalesces high-frequency mouse moves, candle ticks, and state changes
+   * into a single smooth 60fps/144fps screen refresh, eliminating CPU/GPU thrashing.
+   */
   redraw(): void {
+    if (typeof requestAnimationFrame !== 'function') {
+      this.redrawImmediate();
+      return;
+    }
+    if (this.redrawRafId !== null) return;
+    this.redrawRafId = requestAnimationFrame(() => {
+      this.redrawRafId = null;
+      this.redrawImmediate();
+    });
+  }
+
+  /** Force immediate synchronous redraw when required. */
+  redrawImmediate(): void {
+    if (this.redrawRafId !== null) {
+      cancelAnimationFrame(this.redrawRafId);
+      this.redrawRafId = null;
+    }
     if (!this.ctx) return; // headless/test environments without 2d context
     const w = this.canvas.width / (window.devicePixelRatio || 1);
     const h = this.canvas.height / (window.devicePixelRatio || 1);
@@ -1888,6 +1919,10 @@ export class DrawingEngine {
   }
 
   destroy(): void {
+    if (this.redrawRafId !== null) {
+      cancelAnimationFrame(this.redrawRafId);
+      this.redrawRafId = null;
+    }
     window.removeEventListener('keydown', this.onWindowKeyDownShift);
     window.removeEventListener('keyup', this.onWindowKeyUpShift);
     this.container.removeEventListener('pointerdown', this.onContainerPointerDown, true);

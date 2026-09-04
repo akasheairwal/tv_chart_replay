@@ -32,35 +32,47 @@ export function parseCompactHistory(rows: CompactCandleRow[]): ParsedSeriesData 
     return { candles: [], volumes: [] };
   }
 
-  // Deduplicate and ensure strict ascending order by timestamp
-  const sorted = [...rows].sort((a, b) => a[0] - b[0]);
-  const deduplicated: CompactCandleRow[] = [];
-
-  for (const row of sorted) {
-    if (deduplicated.length === 0 || deduplicated[deduplicated.length - 1][0] !== row[0]) {
-      deduplicated.push(row);
+  // Fast-path: check if rows are already strictly ascending (standard from Parquet/backend)
+  let isStrictlyAscending = true;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] <= rows[i - 1][0]) {
+      isStrictlyAscending = false;
+      break;
     }
   }
 
-  const candles: CandlestickData<UTCTimestamp>[] = [];
-  const volumes: HistogramData<UTCTimestamp>[] = [];
+  let sourceRows = rows;
+  if (!isStrictlyAscending) {
+    // Fallback: sort and deduplicate only if out-of-order or duplicate timestamps exist
+    const sorted = [...rows].sort((a, b) => a[0] - b[0]);
+    const deduplicated: CompactCandleRow[] = [];
+    for (const row of sorted) {
+      if (deduplicated.length === 0 || deduplicated[deduplicated.length - 1][0] !== row[0]) {
+        deduplicated.push(row);
+      }
+    }
+    sourceRows = deduplicated;
+  }
 
-  for (const [timestamp, open, high, low, close, volume] of deduplicated) {
-    const time = timestamp as UTCTimestamp;
-    candles.push({
-      time,
-      open,
-      high,
-      low,
-      close,
-    });
+  const n = sourceRows.length;
+  const candles: CandlestickData<UTCTimestamp>[] = new Array(n);
+  const volumes: HistogramData<UTCTimestamp>[] = new Array(n);
 
-    const isUp = close >= open;
-    volumes.push({
+  for (let i = 0; i < n; i++) {
+    const row = sourceRows[i];
+    const time = row[0] as UTCTimestamp;
+    const open = row[1];
+    const high = row[2];
+    const low = row[3];
+    const close = row[4];
+    const volume = row[5];
+
+    candles[i] = { time, open, high, low, close };
+    volumes[i] = {
       time,
       value: volume,
-      color: isUp ? UP_VOLUME_COLOR : DOWN_VOLUME_COLOR,
-    });
+      color: close >= open ? UP_VOLUME_COLOR : DOWN_VOLUME_COLOR,
+    };
   }
 
   return { candles, volumes };

@@ -71,6 +71,10 @@ class DukascopyProvider(DataProvider):
     priority = 90
     supported_asset_classes = frozenset({AssetClass.FOREX, AssetClass.METAL})
 
+    def __init__(self, *, enabled: bool | None = None) -> None:
+        super().__init__(enabled=enabled)
+        self._session = requests.Session()
+
     def supports_symbol(self, symbol: Symbol) -> bool:
         if symbol.asset_class not in self.supported_asset_classes:
             return False
@@ -116,7 +120,7 @@ class DukascopyProvider(DataProvider):
             }
 
             try:
-                resp = requests.get(
+                resp = self._session.get(
                     "https://freeserv.dukascopy.com/2.0/index.php",
                     params=params,
                     headers=_HEADERS,

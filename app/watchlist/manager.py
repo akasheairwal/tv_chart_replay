@@ -26,11 +26,16 @@ class WatchlistManager:
     def __init__(self, db_path: str | Any):
         self.db_path = str(db_path)
         self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.execute("PRAGMA synchronous = NORMAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
+        self._conn.execute("PRAGMA cache_size = -8000")
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+        with self._lock:
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist (
                     symbol TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
@@ -39,22 +44,26 @@ class WatchlistManager:
                     added_at REAL NOT NULL
                 )
             """)
-            conn.commit()
+            self._conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_watchlist_fav_added
+                ON watchlist(is_favorite DESC, added_at ASC)
+            """)
+            self._conn.commit()
 
             # Seed default watchlist if table is empty
-            cursor = conn.execute("SELECT COUNT(*) FROM watchlist")
+            cursor = self._conn.execute("SELECT COUNT(*) FROM watchlist")
             if cursor.fetchone()[0] == 0:
                 for item in DEFAULT_WATCHLIST:
-                    conn.execute("""
+                    self._conn.execute("""
                         INSERT OR IGNORE INTO watchlist (symbol, display_name, asset_type, is_favorite, added_at)
                         VALUES (?, ?, ?, ?, ?)
                     """, (item.symbol, item.display_name, item.asset_type, 1 if item.is_favorite else 0, item.added_at))
-                conn.commit()
+                self._conn.commit()
 
     def get_watchlist(self) -> list[WatchlistItem]:
         """Return all watchlist items ordered by favorites first, then added_at."""
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+        with self._lock:
+            cursor = self._conn.execute("""
                 SELECT symbol, display_name, asset_type, is_favorite, added_at
                 FROM watchlist
                 ORDER BY is_favorite DESC, added_at ASC
@@ -76,34 +85,38 @@ class WatchlistManager:
         sym_clean = symbol.upper().strip()
         disp = display_name or sym_clean
         now = time.time()
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+        with self._lock:
+            self._conn.execute("""
                 INSERT INTO watchlist (symbol, display_name, asset_type, is_favorite, added_at)
                 VALUES (?, ?, ?, 0, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                     display_name = excluded.display_name,
                     asset_type = excluded.asset_type
             """, (sym_clean, disp, asset_type, now))
-            conn.commit()
+            self._conn.commit()
         return WatchlistItem(sym_clean, disp, asset_type, False, now)
 
     def remove_item(self, symbol: str) -> bool:
         """Remove a symbol from the watchlist."""
         sym_clean = symbol.upper().strip()
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("DELETE FROM watchlist WHERE symbol = ?", (sym_clean,))
-            conn.commit()
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM watchlist WHERE symbol = ?", (sym_clean,))
+            self._conn.commit()
             return cursor.rowcount > 0
 
     def toggle_favorite(self, symbol: str) -> bool:
         """Toggle favorite status of a watchlist symbol."""
         sym_clean = symbol.upper().strip()
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT is_favorite FROM watchlist WHERE symbol = ?", (sym_clean,))
+        with self._lock:
+            cursor = self._conn.execute("SELECT is_favorite FROM watchlist WHERE symbol = ?", (sym_clean,))
             row = cursor.fetchone()
             if not row:
                 return False
             new_fav = 0 if row[0] else 1
-            conn.execute("UPDATE watchlist SET is_favorite = ? WHERE symbol = ?", (new_fav, sym_clean))
-            conn.commit()
+            self._conn.execute("UPDATE watchlist SET is_favorite = ? WHERE symbol = ?", (new_fav, sym_clean))
+            self._conn.commit()
             return bool(new_fav)
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()

@@ -51,6 +51,7 @@ export class ChartManager {
   private indicatorSeries = new Map<string, ISeriesApi<'Line'>>();
   private drawingEngine: DrawingEngine | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private resizeRafId: number | null = null;
   private loadingEl: HTMLElement | null = null;
   private currentSymbol = '';
 
@@ -179,15 +180,24 @@ export class ChartManager {
       this.onModifySlTpRequest,
     );
 
-    // Setup responsive ResizeObserver
+    // Setup responsive ResizeObserver with requestAnimationFrame debouncing
+    // Prevents "ResizeObserver loop completed with undelivered notifications" and GPU thrashing
     this.resizeObserver = new ResizeObserver((entries) => {
       if (!entries.length || !this.chart) return;
       const { width, height } = entries[0].contentRect;
       if (width > 0 && height > 0) {
-        this.chart.applyOptions({ width, height });
-        if (this.drawingEngine) {
-          this.drawingEngine.resize();
+        if (this.resizeRafId !== null) {
+          cancelAnimationFrame(this.resizeRafId);
         }
+        this.resizeRafId = requestAnimationFrame(() => {
+          this.resizeRafId = null;
+          if (this.chart && width > 0 && height > 0) {
+            this.chart.applyOptions({ width, height });
+            if (this.drawingEngine) {
+              this.drawingEngine.resize();
+            }
+          }
+        });
       }
     });
 
@@ -278,7 +288,6 @@ export class ChartManager {
     if (this.drawingEngine) {
       this.drawingEngine.appendCandle(row);
       this.drawingEngine.setLatestPrice(close);
-      this.drawingEngine.redraw();
     }
   }
 
@@ -371,6 +380,10 @@ export class ChartManager {
    * Clean up chart and listeners.
    */
   destroy(): void {
+    if (this.resizeRafId !== null) {
+      cancelAnimationFrame(this.resizeRafId);
+      this.resizeRafId = null;
+    }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;

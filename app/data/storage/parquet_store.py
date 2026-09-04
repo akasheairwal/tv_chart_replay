@@ -11,7 +11,6 @@ from app.data.models.candle import CANONICAL_COLUMNS
 
 
 def _safe_replace(src: Path, dst: Path, max_retries: int = 5) -> None:
-    gc.collect()
     for attempt in range(max_retries):
         try:
             os.replace(src, dst)
@@ -47,17 +46,21 @@ def read_range(
     """Lazy windowed read with predicate pushdown (#65)."""
     if not path.exists():
         raise FileNotFoundError(path)
-    frame = pl.read_parquet(str(path), memory_map=False)
-    if start_s is not None:
-        frame = frame.filter(pl.col("timestamp") >= int(start_s))
-    if end_s is not None:
-        frame = frame.filter(pl.col("timestamp") <= int(end_s))
+
     if columns:
         missing = [c for c in columns if c not in CANONICAL_COLUMNS]
         if missing:
             raise ValueError(f"Unknown columns requested: {missing}")
-        frame = frame.select(columns)
-    return frame
+
+    # True predicate and projection pushdown via Polars lazy scan engine
+    lf = pl.scan_parquet(str(path))
+    if start_s is not None:
+        lf = lf.filter(pl.col("timestamp") >= int(start_s))
+    if end_s is not None:
+        lf = lf.filter(pl.col("timestamp") <= int(end_s))
+    if columns:
+        lf = lf.select(columns)
+    return lf.collect()
 
 
 def read_all(path: Path, columns: list[str] | None = None) -> pl.DataFrame:

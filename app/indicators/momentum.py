@@ -11,7 +11,10 @@ from app.indicators.base import Indicator
 
 
 def _to_clean_list(arr: np.ndarray) -> list[float | None]:
-    return [None if np.isnan(v) or math.isnan(v) else round(float(v), 6) for v in arr]
+    isnan = math.isnan
+    round_ = round
+    float_ = float
+    return [None if isnan(v) else round_(float_(v), 6) for v in arr]
 
 
 def _calc_ema(data: np.ndarray, period: int) -> np.ndarray:
@@ -147,30 +150,27 @@ class StochasticIndicator(Indicator):
         fast_k = np.full(n, np.nan, dtype=np.float64)
 
         if n >= k_period > 0:
-            for i in range(k_period - 1, n):
-                h = np.max(high[i - k_period + 1 : i + 1])
-                l = np.min(low[i - k_period + 1 : i + 1])
-                if h == l:
-                    fast_k[i] = 50.0
-                else:
-                    fast_k[i] = 100.0 * (close[i] - l) / (h - l)
+            s_high = pl.Series(high).rolling_max(k_period).to_numpy()
+            s_low = pl.Series(low).rolling_min(k_period).to_numpy()
+            diff = s_high - s_low
+            with np.errstate(divide="ignore", invalid="ignore"):
+                fast_k = np.where(diff == 0, 50.0, 100.0 * (close - s_low) / np.where(diff == 0, 1.0, diff))
+            fast_k[: k_period - 1] = np.nan
 
         # Smooth %K
         k = np.full(n, np.nan, dtype=np.float64)
         if smooth_k > 1:
-            for i in range(k_period - 1 + smooth_k - 1, n):
-                window = fast_k[i - smooth_k + 1 : i + 1]
-                if not np.any(np.isnan(window)):
-                    k[i] = np.mean(window)
+            if n >= k_period - 1 + smooth_k:
+                k = pl.Series(fast_k).rolling_mean(smooth_k).to_numpy()
+                k[: k_period - 1 + smooth_k - 1] = np.nan
         else:
             k = fast_k
 
         # %D is SMA of %K
         d = np.full(n, np.nan, dtype=np.float64)
-        if d_period > 0:
-            for i in range(d_period - 1, n):
-                window = k[i - d_period + 1 : i + 1]
-                if not np.any(np.isnan(window)):
-                    d[i] = np.mean(window)
+        if d_period > 0 and n >= d_period:
+            d = pl.Series(k).rolling_mean(d_period).to_numpy()
+            valid_start = (k_period - 1 + (smooth_k - 1 if smooth_k > 1 else 0)) + d_period - 1
+            d[:valid_start] = np.nan
 
         return {"k": _to_clean_list(k), "d": _to_clean_list(d)}

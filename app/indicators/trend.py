@@ -18,7 +18,10 @@ def _get_series(frame: pl.DataFrame, source: str = "close") -> np.ndarray:
 
 
 def _to_clean_list(arr: np.ndarray) -> list[float | None]:
-    return [None if np.isnan(v) or math.isnan(v) else round(float(v), 6) for v in arr]
+    isnan = math.isnan
+    round_ = round
+    float_ = float
+    return [None if isnan(v) else round_(float_(v), 6) for v in arr]
 
 
 def _calc_wma(data: np.ndarray, period: int) -> np.ndarray:
@@ -29,12 +32,16 @@ def _calc_wma(data: np.ndarray, period: int) -> np.ndarray:
 
     weights = np.arange(1, period + 1, dtype=np.float64)
     w_sum = weights.sum()
+    kernel = weights[::-1] / w_sum
 
-    for i in range(period - 1, n):
-        window = data[i - period + 1 : i + 1]
-        if np.any(np.isnan(window)):
-            continue
-        out[i] = np.dot(window, weights) / w_sum
+    if np.isnan(data).any():
+        for i in range(period - 1, n):
+            window = data[i - period + 1 : i + 1]
+            if np.any(np.isnan(window)):
+                continue
+            out[i] = np.dot(window, weights) / w_sum
+    else:
+        out[period - 1 :] = np.convolve(data, kernel, mode="valid")
     return out
 
 
@@ -192,14 +199,13 @@ class SupertrendIndicator(Indicator):
         close = frame["close"].to_numpy()
 
         # True Range
-        tr = np.zeros(n, dtype=np.float64)
+        tr = np.empty(n, dtype=np.float64)
         tr[0] = high[0] - low[0]
-        for i in range(1, n):
-            tr[i] = max(
-                high[i] - low[i],
-                abs(high[i] - close[i - 1]),
-                abs(low[i] - close[i - 1]),
-            )
+        if n > 1:
+            hl = high[1:] - low[1:]
+            hc = np.abs(high[1:] - close[:-1])
+            lc = np.abs(low[1:] - close[:-1])
+            tr[1:] = np.maximum(hl, np.maximum(hc, lc))
 
         # ATR (Wilder)
         atr = np.zeros(n, dtype=np.float64)

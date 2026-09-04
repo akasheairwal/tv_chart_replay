@@ -117,7 +117,7 @@ class BridgeCommandHandler(QObject):
             limit = request.get("limit")
             if limit is not None:
                 frame = frame.tail(int(limit))
-            rows = [list(r) for r in frame.iter_rows()]
+            rows = frame.rows()
             return {"columns": CANONICAL_COLUMNS, "count": len(rows), "rows": rows}
 
         return self._envelope(action)

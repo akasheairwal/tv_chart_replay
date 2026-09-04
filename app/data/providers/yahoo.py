@@ -82,6 +82,18 @@ _SEARCH_CACHE_MAX = 256
 _search_cache: dict[str, tuple[float, list[SymbolSearchResult]]] = {}
 
 
+_http_session = None
+
+
+def _get_http_session():
+    global _http_session
+    if _http_session is None:
+        import requests
+
+        _http_session = requests.Session()
+    return _http_session
+
+
 def search_yahoo(query: str, limit: int = 10) -> list[SymbolSearchResult]:
     """Full-text symbol search against Yahoo Finance.
 
@@ -102,8 +114,9 @@ def search_yahoo(query: str, limit: int = 10) -> list[SymbolSearchResult]:
     if cached is not None and now - cached[0] < _SEARCH_CACHE_TTL_S:
         return list(cached[1])
 
+    session = _get_http_session()
     try:
-        resp = requests.get(
+        resp = session.get(
             _YAHOO_SEARCH_URL,
             params={
                 "q": cleaned,

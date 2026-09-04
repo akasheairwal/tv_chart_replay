@@ -367,27 +367,23 @@ export class App {
   }
 
   private animateChartResize(durationMs = 300): void {
-    const startTime = performance.now();
-    const tick = (now: number) => {
-      const elapsed = now - startTime;
-      const chartContainer = document.getElementById('chart-container');
-      if (chartContainer) {
-        const w = chartContainer.clientWidth;
-        const h = chartContainer.clientHeight;
-        if (w > 0 && h > 0) {
-          this.chart.resize(w, h);
-        }
+    const chartContainer = document.getElementById('chart-container');
+    if (!chartContainer) return;
+
+    // Trigger an immediate resize, then a final check once the CSS transition completes.
+    // Intermediate sizes are smoothly handled by the debounced ResizeObserver without GPU thrashing.
+    const w = chartContainer.clientWidth;
+    const h = chartContainer.clientHeight;
+    if (w > 0 && h > 0) {
+      this.chart.resize(w, h);
+    }
+
+    setTimeout(() => {
+      const finalContainer = document.getElementById('chart-container');
+      if (finalContainer && finalContainer.clientWidth > 0 && finalContainer.clientHeight > 0) {
+        this.chart.resize(finalContainer.clientWidth, finalContainer.clientHeight);
       }
-      if (elapsed < durationMs) {
-        requestAnimationFrame(tick);
-      } else {
-        const finalContainer = document.getElementById('chart-container');
-        if (finalContainer) {
-          this.chart.resize(finalContainer.clientWidth, finalContainer.clientHeight);
-        }
-      }
-    };
-    requestAnimationFrame(tick);
+    }, durationMs + 30);
   }
 
   private stateUpdateTimer: ReturnType<typeof setTimeout> | null = null;

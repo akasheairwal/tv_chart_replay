@@ -13,11 +13,16 @@ class TradeJournal:
     def __init__(self, db_path: str | Any):
         self.db_path = str(db_path)
         self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.execute("PRAGMA synchronous = NORMAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
+        self._conn.execute("PRAGMA cache_size = -8000")
         self._init_db()
 
     def _init_db(self) -> None:
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+        with self._lock:
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS trade_journal (
                     id TEXT PRIMARY KEY,
                     symbol TEXT NOT NULL,
@@ -33,7 +38,11 @@ class TradeJournal:
                     exit_reason TEXT NOT NULL
                 )
             """)
-            conn.commit()
+            self._conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_trade_journal_closed
+                ON trade_journal(closed_at DESC)
+            """)
+            self._conn.commit()
 
     def record_trade(
         self,
@@ -68,8 +77,8 @@ class TradeJournal:
             "exit_reason": exit_reason,
         }
 
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+        with self._lock:
+            self._conn.execute("""
                 INSERT OR REPLACE INTO trade_journal (
                     id, symbol, side, quantity, entry_price, exit_price, pnl, pnl_percent, commission, opened_at, closed_at, exit_reason
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -78,12 +87,12 @@ class TradeJournal:
                 trade["entry_price"], trade["exit_price"], trade["pnl"], trade["pnl_percent"],
                 trade["commission"], trade["opened_at"], trade["closed_at"], trade["exit_reason"]
             ))
-            conn.commit()
+            self._conn.commit()
         return trade
 
     def get_trades(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+        with self._lock:
+            cursor = self._conn.execute("""
                 SELECT id, symbol, side, quantity, entry_price, exit_price, pnl, pnl_percent, commission, opened_at, closed_at, exit_reason
                 FROM trade_journal
                 ORDER BY closed_at DESC
@@ -109,6 +118,10 @@ class TradeJournal:
             ]
 
     def clear(self) -> None:
-        with self._lock, sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM trade_journal")
-            conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM trade_journal")
+            self._conn.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()

@@ -8,8 +8,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Performance & low-resource tuning: configure Chromium flags before QtWebEngine init
+# Enables hardware rasterization, multi-threaded raster, and prevents background throttling stalls
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--enable-gpu-rasterization --ignore-gpu-blocklist --disable-background-timer-throttling --num-raster-threads=4",
+)
 
 # Ensure workspace root is in sys.path when invoked directly via python app/main.py
 _root = Path(__file__).resolve().parent.parent

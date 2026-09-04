@@ -68,25 +68,14 @@ class ReplayEngine(QObject):
 
         if start_index is None:
             if start_s is not None:
-                # Find index matching start_s
-                ts_col = frame["timestamp"].to_list()
-                start_index = 0
-                for idx, t in enumerate(ts_col):
-                    if t >= start_s:
-                        start_index = idx
-                        break
+                start_index = self._dataset.find_index_for_timestamp(start_s, mode="gte")
             else:
                 start_index = min(warmup_candles, max(0, total - 1))
 
         start_index = max(0, min(start_index, total - 1))
 
         if end_s is not None:
-            ts_col = frame["timestamp"].to_list()
-            end_index = total - 1
-            for idx, t in enumerate(ts_col):
-                if t >= end_s:
-                    end_index = idx
-                    break
+            end_index = self._dataset.find_index_for_timestamp(end_s, mode="gte")
         else:
             end_index = total - 1
 
@@ -238,14 +227,7 @@ class ReplayEngine(QObject):
         self.pause()
         target = target_index_or_timestamp
         if target > 1_000_000_000:
-            # Target is timestamp -> find closest index <= target
-            closest_idx = 0
-            for idx in range(self._dataset.total_candles):
-                if self._dataset.timestamp_at(idx) <= target:
-                    closest_idx = idx
-                else:
-                    break
-            target_idx = closest_idx
+            target_idx = self._dataset.find_index_for_timestamp(target, mode="lte")
         else:
             target_idx = max(0, min(target, self._dataset.total_candles - 1))
 

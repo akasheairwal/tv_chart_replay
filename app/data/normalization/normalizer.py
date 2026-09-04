@@ -39,12 +39,10 @@ def normalize(frame: pl.DataFrame) -> NormalizationResult:
         [pl.col(c).cast(t, strict=False) for c, t in SCHEMA_DTYPES.items()]
     )
 
-    null_ts = int(selected.select(pl.col("timestamp").is_null().sum()).item())
-    selected = selected.filter(pl.col("timestamp").is_not_null()).sort("timestamp")
-
-    total_after_null = selected.height
-    deduped = selected.unique(subset=["timestamp"], keep="last").sort("timestamp")
-    duplicates = total_after_null - deduped.height
+    filtered = selected.filter(pl.col("timestamp").is_not_null())
+    null_ts = input_rows - filtered.height
+    deduped = filtered.unique(subset=["timestamp"], keep="last").sort("timestamp")
+    duplicates = filtered.height - deduped.height
 
     return NormalizationResult(
         frame=deduped,
