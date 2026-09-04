@@ -1650,6 +1650,21 @@ export class DrawingEngine {
       if (pixels.length === 1) {
         return distanceToPoint(px, py, pixels[0].x, pixels[0].y) <= threshold;
       }
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (let i = 0; i < pixels.length; i++) {
+        const x = pixels[i].x;
+        const y = pixels[i].y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      if (px < minX - threshold || px > maxX + threshold || py < minY - threshold || py > maxY + threshold) {
+        return false;
+      }
       for (let i = 0; i < pixels.length - 1; i++) {
         if (
           distanceToSegment(px, py, pixels[i].x, pixels[i].y, pixels[i + 1].x, pixels[i + 1].y) <=
@@ -1664,6 +1679,11 @@ export class DrawingEngine {
     if (!p2) return false;
 
     if (d.type === 'trend_line' || d.type === 'arrow') {
+      const minX = Math.min(p1.x, p2.x) - 8;
+      const maxX = Math.max(p1.x, p2.x) + 8;
+      const minY = Math.min(p1.y, p2.y) - 8;
+      const maxY = Math.max(p1.y, p2.y) + 8;
+      if (px < minX || px > maxX || py < minY || py > maxY) return false;
       return distanceToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 8;
     }
     if (d.type === 'extended_line') {
@@ -1735,6 +1755,12 @@ export class DrawingEngine {
       // selectable in empty space.
       if (!p2) return false;
       const channelHeight = Math.abs(p2.y - p1.y) * 0.4 + 30;
+      const minX = Math.min(p1.x, p2.x) - channelHeight;
+      const maxX = Math.max(p1.x, p2.x) + channelHeight;
+      const minY = Math.min(p1.y, p2.y) - channelHeight;
+      const maxY = Math.max(p1.y, p2.y) + channelHeight;
+      if (px < minX || px > maxX || py < minY || py > maxY) return false;
+
       const len = distanceToPoint(p1.x, p1.y, p2.x, p2.y);
       if (len < 1) {
         return distanceToPoint(px, py, p1.x, p1.y) <= channelHeight;
@@ -1749,6 +1775,12 @@ export class DrawingEngine {
 
     if (p3) {
       if (d.type === 'triangle') {
+        const minX = Math.min(p1.x, p2.x, p3.x) - 8;
+        const maxX = Math.max(p1.x, p2.x, p3.x) + 8;
+        const minY = Math.min(p1.y, p2.y, p3.y) - 8;
+        const maxY = Math.max(p1.y, p2.y, p3.y) + 8;
+        if (px < minX || px > maxX || py < minY || py > maxY) return false;
+
         return (
           isPointInPolygon(px, py, [p1, p2, p3]) ||
           distanceToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 8 ||
@@ -1783,6 +1815,12 @@ export class DrawingEngine {
         return medianHit || upperHit || lowerHit;
       }
       if (d.type === 'fib_extension' || d.type === 'fib_projection') {
+        const minX = Math.min(p1.x, p2.x, p3.x) - 8;
+        const maxX = Math.max(p1.x, p2.x, p3.x) + 8;
+        const minY = Math.min(p1.y, p2.y, p3.y) - 8;
+        const maxY = Math.max(p1.y, p2.y, p3.y) + 8;
+        if (px < minX || px > maxX || py < minY || py > maxY) return false;
+
         return (
           distanceToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 8 ||
           distanceToSegment(px, py, p2.x, p2.y, p3.x, p3.y) <= 8

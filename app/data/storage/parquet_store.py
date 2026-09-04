@@ -32,7 +32,9 @@ def write_dataframe(path: Path, frame: pl.DataFrame) -> int:
     """Write a canonical frame to Parquet; returns file size in bytes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".tmp_{uuid.uuid4().hex}_{path.name}")
-    frame.select(CANONICAL_COLUMNS).write_parquet(str(tmp_path))
+    frame.select(CANONICAL_COLUMNS).write_parquet(
+        str(tmp_path), compression="zstd", row_group_size=50_000
+    )
     _safe_replace(tmp_path, path)
     return path.stat().st_size
 

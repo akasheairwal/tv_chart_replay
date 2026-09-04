@@ -1,6 +1,7 @@
 """Dataset store: Parquet IO + registry + coverage bookkeeping."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
 
 import polars as pl
@@ -19,6 +20,8 @@ class DatasetStore:
     def __init__(self, paths: Paths, dataset_registry: DatasetRegistry) -> None:
         self.paths = paths
         self.registry = dataset_registry
+        self._cache: OrderedDict[tuple[str, str], pl.DataFrame] = OrderedDict()
+        self._max_cache_size = 4
 
     def parquet_path_for(
         self, symbol: Symbol, timeframe: Timeframe, asset_class: AssetClass | str
@@ -89,15 +92,28 @@ class DatasetStore:
             provider,
         )
         self.registry.set_status(info.dataset_id, "READY")
+        if len(self._cache) >= self._max_cache_size:
+            self._cache.popitem(last=False)
+        self._cache[(sym_str, tf_str)] = combined
         return self.registry.info(sym_str, tf_str)
 
     def load_all(self, symbol: Symbol | str, timeframe: Timeframe | str) -> pl.DataFrame:
         sym_str = getattr(symbol, "symbol", symbol)
         tf_str = getattr(timeframe, "freq", timeframe)
+        key = (sym_str, tf_str)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
         info = self.registry.get(sym_str, tf_str)
         if info is None or not info.file_path or not Path(info.file_path).exists():
             return parquet_store.empty_canonical()
-        return parquet_store.read_all(Path(info.file_path))
+        frame = parquet_store.read_all(Path(info.file_path))
+        if frame.height > 0:
+            if len(self._cache) >= self._max_cache_size:
+                self._cache.popitem(last=False)
+            self._cache[key] = frame
+        return frame
 
     def load_range(
         self,
@@ -111,8 +127,26 @@ class DatasetStore:
         target_tf = timeframe if isinstance(timeframe, Timeframe) else Timeframe.parse(timeframe)
         tf_str = target_tf.freq
 
+        key = (sym_str, tf_str)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            cached = self._cache[key]
+            if start_s is not None or end_s is not None or columns is not None:
+                res = cached
+                if start_s is not None:
+                    res = res.filter(pl.col("timestamp") >= start_s)
+                if end_s is not None:
+                    res = res.filter(pl.col("timestamp") <= end_s)
+                if columns is not None:
+                    avail = [c for c in columns if c in res.columns]
+                    res = res.select(avail)
+                return res
+            return cached
+
         info = self.registry.get(sym_str, tf_str)
         if info is not None and info.file_path and Path(info.file_path).exists():
+            if start_s is None and end_s is None and columns is None:
+                return self.load_all(symbol, timeframe)
             return parquet_store.read_range(Path(info.file_path), start_s, end_s, columns)
 
         # Fallback: check if a finer base timeframe exists for this symbol and resample

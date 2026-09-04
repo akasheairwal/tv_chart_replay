@@ -296,8 +296,10 @@ export class ChartManager {
    */
   addIndicatorLineSeries(id: string, color: string, overlay: boolean, title: string): void {
     if (!this.chart) return;
-    if (this.indicatorSeries.has(id)) {
-      this.removeIndicatorSeries(id);
+    const existing = this.indicatorSeries.get(id);
+    if (existing) {
+      existing.applyOptions({ color, title });
+      return;
     }
 
     const seriesOptions: any = {

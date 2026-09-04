@@ -52,6 +52,16 @@ class IsolatedDataset:
         row = self._frame.row(index)
         return list(row)
 
+    def candle_slice(self, start_idx: int, end_idx: int) -> list[list[Any]]:
+        """Return candle rows in range [start_idx, end_idx] inclusive."""
+        if start_idx > end_idx:
+            return []
+        self._assert_bounds(end_idx)
+        if start_idx < 0:
+            raise IndexError(f"Negative start index: {start_idx}")
+        count = end_idx - start_idx + 1
+        return [list(r) for r in self._frame.slice(start_idx, count).rows()]
+
     def slice_visible(self, current_index: int) -> pl.DataFrame:
         """Return visible history up to and including ``current_index``.
         

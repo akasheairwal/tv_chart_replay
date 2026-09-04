@@ -21,6 +21,33 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _get_indicator_warmup(indicator_name: str, params: dict[str, Any] | None) -> int | None:
+    p = params or {}
+    name = indicator_name.lower()
+    if name in ("sma", "wma"):
+        return int(p.get("period", 14)) + 5
+    if name == "hma":
+        period = int(p.get("period", 14))
+        import math
+        return period + math.isqrt(period) + 10
+    if name in ("ema", "rsi", "atr", "supertrend", "keltner"):
+        period = int(p.get("period", 14))
+        return max(250, period * 10)
+    if name == "macd":
+        slow = int(p.get("slow_period", 26))
+        signal = int(p.get("signal_period", 9))
+        return max(250, (slow + signal) * 6)
+    if name == "stochastic":
+        k_period = int(p.get("k_period", 14))
+        d_period = int(p.get("d_period", 3))
+        return k_period + d_period + 50
+    if name in ("bb", "bollinger", "bollinger_bands"):
+        return int(p.get("period", 20)) + 5
+    if name == "mfi":
+        return int(p.get("period", 14)) + 5
+    return None
+
+
 class BridgeCommandHandler(QObject):
     """The single QWebChannel object registered as ``bridge``.
 
@@ -267,10 +294,6 @@ class BridgeCommandHandler(QObject):
 
     @Slot(str, result=str)
     def calculateIndicator(self, request_json: str) -> str:  # camelCase: bridge contract name
-        import polars as pl
-
-        from app.data.models.candle import CANONICAL_COLUMNS
-
         def action() -> Any:
             request = json.loads(request_json)
             indicator_name = str(request.get("indicator_name", "")).lower()
@@ -278,11 +301,7 @@ class BridgeCommandHandler(QObject):
 
             # Check if active replay session exists for this calculation
             if self._services.replay_engine.is_active:
-                rows = self._services.replay_engine.visible_candles()
-                if not rows:
-                    frame = pl.DataFrame(schema=[(c, pl.Float64) if c != "timestamp" else (c, pl.Int64) for c in CANONICAL_COLUMNS])
-                else:
-                    frame = pl.DataFrame(rows, schema=[(c, pl.Float64) if c != "timestamp" else (c, pl.Int64) for c in CANONICAL_COLUMNS], orient="row")
+                frame = self._services.replay_engine.visible_frame()
             else:
                 sym_raw = str(request.get("symbol", "")).upper() or "EURUSD"
                 symbol = self._resolve_symbol(sym_raw)
@@ -294,12 +313,19 @@ class BridgeCommandHandler(QObject):
                     end_s=request.get("end_s"),
                 )
 
+            last_n = request.get("last_n")
+            calc_frame = frame
+            if last_n is not None and int(last_n) > 0 and frame.height > 0:
+                n = int(last_n)
+                warmup = _get_indicator_warmup(indicator_name, params)
+                if warmup is not None and frame.height > (n + warmup):
+                    calc_frame = frame.tail(n + warmup)
+
             res = self._services.indicator_engine.calculate(
                 indicator_name,
-                frame,
+                calc_frame,
                 params=params,
             )
-            last_n = request.get("last_n")
             if last_n is not None and int(last_n) > 0 and isinstance(res, dict):
                 n = int(last_n)
                 if "timestamps" in res and isinstance(res["timestamps"], list):

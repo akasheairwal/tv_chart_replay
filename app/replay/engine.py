@@ -174,7 +174,7 @@ class ReplayEngine(QObject):
         self._state.current_index = new_index
         self._state.current_timestamp = self._dataset.timestamp_at(new_index)
 
-        new_candles = [self._dataset.candle_at(i) for i in range(old_index + 1, new_index + 1)]
+        new_candles = self._dataset.candle_slice(old_index + 1, new_index)
 
         for idx_offset, candle in enumerate(new_candles):
             candle_idx = old_index + 1 + idx_offset
@@ -275,6 +275,12 @@ class ReplayEngine(QObject):
         assert self._state is not None
         assert self._dataset is not None
         return self._dataset.visible_rows(self._state.current_index)
+
+    def visible_frame(self) -> pl.DataFrame:
+        self._require_active()
+        assert self._state is not None
+        assert self._dataset is not None
+        return self._dataset.slice_visible(self._state.current_index)
 
     def current_candle(self) -> list[Any]:
         self._require_active()
