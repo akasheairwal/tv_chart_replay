@@ -1,6 +1,7 @@
 import type { PythonBridge } from '../bridge/python-bridge';
 import type { CompactCandleRow } from '../chart/candle-series';
 import type { ChartManager } from '../chart/chart-manager';
+import { SubTickGenerator } from './sub-tick-generator';
 
 export interface ReplayState {
   symbol: string;
@@ -32,13 +33,41 @@ export class ReplayController {
   private activeSpeed = 1.0;
   private browserCandles: CompactCandleRow[] = [];
   private browserTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly subTickGenerator: SubTickGenerator;
 
   constructor(
     private readonly bridge: PythonBridge | null,
     private readonly chart: ChartManager,
     private readonly onStateChange: (state: ReplayState) => void,
+    private readonly onPriceTick?: (price: number) => void,
   ) {
+    this.subTickGenerator = new SubTickGenerator({
+      onMicroTick: (candle, price) => {
+        if (typeof (this.chart as any).updateCandle === 'function') {
+          (this.chart as any).updateCandle(candle);
+        } else {
+          this.chart.appendCandle(candle);
+        }
+        if (this.onPriceTick) {
+          this.onPriceTick(price);
+        }
+      },
+      onCommit: (candle) => {
+        this.chart.appendCandle(candle);
+        if (typeof (this.chart as any).triggerCameraFollow === 'function') {
+          (this.chart as any).triggerCameraFollow();
+        }
+        if (this.onPriceTick) {
+          this.onPriceTick(candle[4]);
+        }
+      },
+    });
     this.subscribeEvents();
+  }
+
+  /** Feed a candle through the adaptive sub-tick generator */
+  feedCandle(candle: CompactCandleRow, manualStep = false): void {
+    this.subTickGenerator.feed(candle, this.activeSpeed, manualStep);
   }
 
   get state(): ReplayState | null {
@@ -187,8 +216,9 @@ export class ReplayController {
   }
 
   async pause(): Promise<void> {
-    // 1. Immediately halt any browser playback timer
+    // 1. Immediately halt any browser playback timer and flush in-flight sub-tick tween
     this.stopBrowserPlayback();
+    this.subTickGenerator.flush();
 
     // 2. Immediate optimistic state update to PAUSED so UI flips right away
     if (this.currentState) {
@@ -222,8 +252,13 @@ export class ReplayController {
         this.onStateChange(this.currentState);
         return;
       }
-      for (let i = oldIdx + 1; i <= newIdx; i++) {
-        this.chart.appendCandle(this.browserCandles[i]);
+      if (newIdx - oldIdx === 1) {
+        this.feedCandle(this.browserCandles[newIdx], !this.isPlaying);
+      } else {
+        for (let i = oldIdx + 1; i < newIdx; i++) {
+          this.chart.appendCandle(this.browserCandles[i]);
+        }
+        this.feedCandle(this.browserCandles[newIdx], !this.isPlaying);
       }
       const isFin = newIdx >= this.currentState.end_index;
       if (isFin) this.stopBrowserPlayback();
@@ -245,14 +280,21 @@ export class ReplayController {
     if (res.ok && res.data) {
       this.currentState = res.data.state;
       this.activeSpeed = res.data.state.speed;
-      for (const candle of res.data.candles) {
-        this.chart.appendCandle(candle);
+      const candles = res.data.candles;
+      if (candles.length === 1) {
+        this.feedCandle(candles[0], !this.isPlaying);
+      } else if (candles.length > 1) {
+        for (let i = 0; i < candles.length - 1; i++) {
+          this.chart.appendCandle(candles[i]);
+        }
+        this.feedCandle(candles[candles.length - 1], !this.isPlaying);
       }
       this.onStateChange(this.currentState);
     }
   }
 
   async stepBackward(step = 1): Promise<void> {
+    this.subTickGenerator.cancel();
     if (!this.bridge) {
       if (!this.currentState || this.browserCandles.length === 0) return;
       this.stopBrowserPlayback();
@@ -277,6 +319,7 @@ export class ReplayController {
   }
 
   async jumpTo(target: number): Promise<void> {
+    this.subTickGenerator.cancel();
     if (!this.bridge) {
       if (!this.currentState || this.browserCandles.length === 0) return;
       this.stopBrowserPlayback();
@@ -306,6 +349,7 @@ export class ReplayController {
   }
 
   async reset(): Promise<void> {
+    this.subTickGenerator.cancel();
     if (!this.bridge) {
       if (!this.currentState || this.browserCandles.length === 0) return;
       this.stopBrowserPlayback();
@@ -331,6 +375,9 @@ export class ReplayController {
 
   async setSpeed(speed: number): Promise<void> {
     this.activeSpeed = speed;
+    if (speed > 2.0) {
+      this.subTickGenerator.flush();
+    }
     if (this.currentState) {
       this.currentState = { ...this.currentState, speed };
       this.onStateChange(this.currentState);
@@ -377,7 +424,7 @@ export class ReplayController {
     this.bridge.onEvent('replay.candle', (payload: unknown) => {
       const data = payload as { candle: CompactCandleRow; index: number };
       if (data && data.candle) {
-        this.chart.appendCandle(data.candle);
+        this.feedCandle(data.candle, false);
       }
     });
 

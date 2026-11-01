@@ -18,6 +18,7 @@ export class TradingDrawer {
     private readonly onAccountSummaryUpdated?: (account: AccountSummary) => void,
     private readonly onModifySlTp?: (pos: PositionDefinition) => void,
     private readonly onPartialClose?: (pos: PositionDefinition, currentPrice: number) => void,
+    private readonly onCollapseChange?: (collapsed: boolean) => void,
   ) {
     this.onAccountSummaryUpdated = onAccountSummaryUpdated;
     this.container = this.buildDrawer();
@@ -130,11 +131,15 @@ export class TradingDrawer {
     // Toggle collapse
     el.querySelector('#drawer-toggle-btn')!.addEventListener('click', () => {
       el.classList.toggle('collapsed');
+      const isCollapsed = el.classList.contains('collapsed');
       const icon = el.querySelector('#drawer-toggle-btn');
       if (icon) {
-        icon.innerHTML = el.classList.contains('collapsed')
+        icon.innerHTML = isCollapsed
           ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>`
           : getIcon('chevron_down');
+      }
+      if (this.onCollapseChange) {
+        this.onCollapseChange(isCollapsed);
       }
     });
 

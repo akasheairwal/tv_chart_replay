@@ -299,11 +299,12 @@ body {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  transform: translateZ(0);
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               border-color 0.25s ease;
-  will-change: width, min-width, max-width;
+  will-change: width, min-width, max-width, transform;
 }
 
 .panel.exness-watchlist.collapsed {
@@ -326,11 +327,12 @@ body {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  transform: translateZ(0);
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               min-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
               border-color 0.25s ease;
-  will-change: width, min-width, max-width;
+  will-change: width, min-width, max-width, transform;
 }
 
 .panel.exness-trade-panel.collapsed {
@@ -814,7 +816,8 @@ body {
   position: fixed;
   top: 60px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
+  will-change: transform;
   background: rgba(30, 34, 45, 0.97);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -1615,7 +1618,9 @@ body {
   display: flex;
   flex-direction: column;
   height: 190px;
+  transform: translateZ(0);
   transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: height, transform;
   z-index: 35;
 }
 
@@ -1635,6 +1640,8 @@ body {
   padding: 0 12px;
   border-bottom: 1px solid var(--tv-border-subtle);
   background: var(--tv-panel-subtle);
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .trading-drawer-tabs {
@@ -1836,6 +1843,8 @@ body {
   flex-direction: column;
   overflow: hidden;
   animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 @keyframes modalPop {
@@ -2447,6 +2456,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .sltp-modal-header {
@@ -2779,6 +2790,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .partial-modal-header {
@@ -3188,4 +3201,36 @@ body {
 
 .tv-modal-btn.trade:hover {
   background: #067764 !important;
+}
+/* ===================================================================
+   Tabular Numerics for High-Frequency Price, PnL & Order Inputs
+   Eliminates visual jitter and layout shifts during fast market ticks
+   =================================================================== */
+
+.sym-price,
+.ticker-price,
+.header-price-badge,
+.quick-btn-price,
+.quick-qty-input,
+.quick-spread-val,
+.quote-price,
+.spread-pill,
+.order-field-input,
+.order-lot-info,
+.rc-metric-value,
+.trade-summary-pnl,
+.trade-summary-count,
+.position-pnl,
+.pnl-green,
+.pnl-red,
+.account-pill,
+.account-card-val,
+.trading-drawer-table td,
+.pos-stat-val,
+.sltp-calc-val,
+.sltp-metric-val,
+.partial-val,
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }

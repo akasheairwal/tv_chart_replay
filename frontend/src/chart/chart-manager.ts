@@ -52,8 +52,15 @@ export class ChartManager {
   private drawingEngine: DrawingEngine | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeRafId: number | null = null;
+  private isResizePaused = false;
   private loadingEl: HTMLElement | null = null;
   private currentSymbol = '';
+  private candleCount = 0;
+  private cameraPanRafId: number | null = null;
+  private isUserInteracting = false;
+  private onUserPointerDown?: () => void;
+  private onUserPointerUp?: () => void;
+  private onUserWheel?: () => void;
 
   constructor(
     private readonly container: HTMLElement,
@@ -184,6 +191,7 @@ export class ChartManager {
     // Prevents "ResizeObserver loop completed with undelivered notifications" and GPU thrashing
     this.resizeObserver = new ResizeObserver((entries) => {
       if (!entries.length || !this.chart) return;
+      if (this.isResizePaused) return;
       const { width, height } = entries[0].contentRect;
       if (width > 0 && height > 0) {
         if (this.resizeRafId !== null) {
@@ -191,7 +199,7 @@ export class ChartManager {
         }
         this.resizeRafId = requestAnimationFrame(() => {
           this.resizeRafId = null;
-          if (this.chart && width > 0 && height > 0) {
+          if (this.chart && !this.isResizePaused && width > 0 && height > 0) {
             this.chart.applyOptions({ width, height });
             if (this.drawingEngine) {
               this.drawingEngine.resize();
@@ -202,16 +210,48 @@ export class ChartManager {
     });
 
     this.resizeObserver.observe(this.container);
+
+    // Cancel smooth camera panning immediately upon any user touch/mouse/wheel interaction
+    this.onUserPointerDown = () => {
+      this.isUserInteracting = true;
+      this.cancelCameraAnimation();
+    };
+    this.onUserPointerUp = () => {
+      this.isUserInteracting = false;
+    };
+    this.onUserWheel = () => {
+      this.cancelCameraAnimation();
+    };
+
+    this.container.addEventListener('pointerdown', this.onUserPointerDown);
+    window.addEventListener('pointerup', this.onUserPointerUp);
+    this.container.addEventListener('wheel', this.onUserWheel, { passive: true });
   }
 
-  resize(width: number, height: number): void {
-    if (this.chart && width > 0 && height > 0) {
-      this.chart.applyOptions({ width, height });
+  pauseResize(): void {
+    this.isResizePaused = true;
+    if (this.resizeRafId !== null) {
+      cancelAnimationFrame(this.resizeRafId);
+      this.resizeRafId = null;
+    }
+  }
+
+  resumeResize(): void {
+    this.isResizePaused = false;
+    this.resize();
+  }
+
+  resize(width?: number, height?: number): void {
+    const w = width ?? this.container.clientWidth;
+    const h = height ?? this.container.clientHeight;
+    if (this.chart && w > 0 && h > 0) {
+      this.chart.applyOptions({ width: w, height: h });
       if (this.drawingEngine) {
         this.drawingEngine.resize();
       }
     }
   }
+
 
   /**
    * Load history compact candle array rows `[[timestamp, o, h, l, c, v], ...]`.
@@ -251,6 +291,8 @@ export class ChartManager {
     this.candlestickSeries.setData(candles);
     this.volumeSeries.setData(volumes);
 
+    this.candleCount = rows.length;
+    this.cancelCameraAnimation();
     this.chart.timeScale().fitContent();
 
     if (this.drawingEngine) {
@@ -288,6 +330,131 @@ export class ChartManager {
     if (this.drawingEngine) {
       this.drawingEngine.appendCandle(row);
       this.drawingEngine.setLatestPrice(close);
+    }
+    this.candleCount++;
+  }
+
+  /**
+   * Update the current forming candle during intra-bar interpolation (ADR 0001 - Domain 2).
+   * Updates candlestick and volume series in place, avoiding expensive drawing overlay invalidation.
+   */
+  updateCandle(row: CompactCandleRow): void {
+    if (!this.candlestickSeries || !this.volumeSeries) return;
+    const [timestamp, open, high, low, close, volume] = row;
+    const time = timestamp as any;
+
+    this.candlestickSeries.update({
+      time,
+      open,
+      high,
+      low,
+      close,
+    });
+
+    const isUp = close >= open;
+    this.volumeSeries.update({
+      time,
+      value: volume,
+      color: isUp ? 'rgba(8, 153, 129, 0.5)' : 'rgba(242, 54, 69, 0.5)',
+    });
+
+    if (this.drawingEngine) {
+      this.drawingEngine.setLatestPrice(close);
+    }
+  }
+
+  /**
+   * Smoothly pans the visible logical range when the replay index reaches or exceeds
+   * the right visible margin (ADR 0001 - Domain 3).
+   *
+   * @param rightMargin Number of blank bars reserved on the right margin (default 8)
+   * @param durationMs Duration of cubic eased pan tween (default 150ms)
+   */
+  triggerCameraFollow(rightMargin = 8, durationMs = 150): void {
+    if (!this.chart || this.isUserInteracting || this.candleCount <= 0) return;
+    const timeScale = this.chart.timeScale();
+    const logicalRange = timeScale.getVisibleLogicalRange();
+    if (!logicalRange) return;
+
+    const lastBarIndex = this.candleCount - 1;
+    const windowSize = logicalRange.to - logicalRange.from;
+    if (isNaN(windowSize) || windowSize <= 2) return;
+
+    // If user scrolled back into history (> 15 bars behind current edge), preserve their view
+    if (logicalRange.to < lastBarIndex - 15) {
+      return;
+    }
+
+    // Trigger smooth panning when bar enters or penetrates right margin
+    if (lastBarIndex >= logicalRange.to - rightMargin) {
+      const targetTo = lastBarIndex + rightMargin;
+      const targetFrom = targetTo - windowSize;
+      if (Number.isFinite(targetFrom) && Number.isFinite(targetTo)) {
+        this.panToLogicalRange(targetFrom, targetTo, durationMs);
+      }
+    }
+  }
+
+  /**
+   * Smoothly pans the chart's visible logical range using ease-out cubic interpolation.
+   */
+  panToLogicalRange(targetFrom: number, targetTo: number, durationMs = 150): void {
+    if (!this.chart || this.isUserInteracting || typeof requestAnimationFrame !== 'function') return;
+    const timeScale = this.chart.timeScale();
+    const currentRange = timeScale.getVisibleLogicalRange();
+    if (!currentRange) return;
+
+    // Already at target within tolerance
+    if (
+      Math.abs(currentRange.from - targetFrom) < 0.1 &&
+      Math.abs(currentRange.to - targetTo) < 0.1
+    ) {
+      return;
+    }
+
+    this.cancelCameraAnimation();
+
+    const startFrom = currentRange.from;
+    const startTo = currentRange.to;
+    const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+    const step = (now: number) => {
+      if (this.isUserInteracting || !this.chart) {
+        this.cameraPanRafId = null;
+        return;
+      }
+
+      const elapsed = Math.max(0, now - startTime);
+      const progress = Math.min(1, elapsed / durationMs);
+      // Ease-out cubic: 1 - (1 - progress)^3
+      const ease = 1 - Math.pow(1 - progress, 3);
+
+      const curFrom = startFrom + (targetFrom - startFrom) * ease;
+      const curTo = startTo + (targetTo - startTo) * ease;
+
+      try {
+        timeScale.setVisibleLogicalRange({ from: curFrom, to: curTo });
+      } catch {
+        /* ignore */
+      }
+
+      if (progress < 1) {
+        this.cameraPanRafId = requestAnimationFrame(step);
+      } else {
+        this.cameraPanRafId = null;
+      }
+    };
+
+    this.cameraPanRafId = requestAnimationFrame(step);
+  }
+
+  /**
+   * Immediately halts any active camera panning animation (e.g. on user drag, wheel, or jump).
+   */
+  cancelCameraAnimation(): void {
+    if (this.cameraPanRafId !== null) {
+      cancelAnimationFrame(this.cameraPanRafId);
+      this.cameraPanRafId = null;
     }
   }
 
@@ -382,6 +549,17 @@ export class ChartManager {
    * Clean up chart and listeners.
    */
   destroy(): void {
+    this.cancelCameraAnimation();
+    if (this.onUserPointerDown) {
+      this.container.removeEventListener('pointerdown', this.onUserPointerDown);
+    }
+    if (this.onUserPointerUp) {
+      window.removeEventListener('pointerup', this.onUserPointerUp);
+    }
+    if (this.onUserWheel) {
+      this.container.removeEventListener('wheel', this.onUserWheel);
+    }
+
     if (this.resizeRafId !== null) {
       cancelAnimationFrame(this.resizeRafId);
       this.resizeRafId = null;

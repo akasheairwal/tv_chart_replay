@@ -140,6 +140,7 @@ export class App {
       bridge,
       this.chart,
       (state) => this.handleReplayStateChange(state),
+      (price) => this.updatePricesAcrossUI(price),
     );
 
     this.replayBar = new ReplayBar(
@@ -164,7 +165,7 @@ export class App {
             toggleBtn.classList.add('active');
           }
         }
-        this.animateChartResize();
+        this.handlePanelTransition();
       },
     );
 
@@ -256,7 +257,7 @@ export class App {
             tradeBtn.classList.add('active');
           }
         }
-        this.animateChartResize();
+        this.handlePanelTransition();
       },
     );
 
@@ -274,6 +275,7 @@ export class App {
         },
         (pos) => this.handleOpenModifySlTpModal(pos),
         (pos, price) => this.handleOpenPartialCloseModal(pos, price),
+        () => this.handlePanelTransition(),
       );
       this.tradingDrawer.start();
     }
@@ -342,28 +344,78 @@ export class App {
     // Default to EURUSD on startup
     this.selectSymbolByName('EURUSD');
 
+    // Setup CSS layout transition listeners for zero-jank canvas resizing
+    this.setupLayoutTransitions();
+
     // Check for autosave on startup
     void this.checkAutosave();
   }
 
-  private animateChartResize(durationMs = 300): void {
-    const chartContainer = document.getElementById('chart-container');
-    if (!chartContainer) return;
+  private panelTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Trigger an immediate resize, then a final check once the CSS transition completes.
-    // Intermediate sizes are smoothly handled by the debounced ResizeObserver without GPU thrashing.
-    const w = chartContainer.clientWidth;
-    const h = chartContainer.clientHeight;
-    if (w > 0 && h > 0) {
-      this.chart.resize(w, h);
+  /**
+   * Handle panel collapse/expand motion.
+   * Freezes chart canvas re-allocation during CSS transitions to prevent
+   * forced reflow thrashing and dropped frames, committing a single clean resize once
+   * the transition finishes.
+   */
+  private handlePanelTransition(): void {
+    this.chart.pauseResize();
+
+    if (this.panelTransitionTimer !== null) {
+      clearTimeout(this.panelTransitionTimer);
     }
 
-    setTimeout(() => {
-      const finalContainer = document.getElementById('chart-container');
-      if (finalContainer && finalContainer.clientWidth > 0 && finalContainer.clientHeight > 0) {
-        this.chart.resize(finalContainer.clientWidth, finalContainer.clientHeight);
+    // Safety fallback: in case transitionend does not fire (e.g. background tab or reduced-motion)
+    this.panelTransitionTimer = setTimeout(() => {
+      this.panelTransitionTimer = null;
+      this.chart.resumeResize();
+    }, 280);
+  }
+
+  /**
+   * Sets up transitionend and transitionstart listeners on docked panels and drawers
+   * to guarantee zero layout jank by deferring canvas resizing until the CSS transition ends.
+   */
+  private setupLayoutTransitions(): void {
+    const handleTransitionEnd = (e: TransitionEvent) => {
+      if (
+        e.propertyName === 'width' ||
+        e.propertyName === 'min-width' ||
+        e.propertyName === 'max-width' ||
+        e.propertyName === 'height'
+      ) {
+        if (this.panelTransitionTimer !== null) {
+          clearTimeout(this.panelTransitionTimer);
+          this.panelTransitionTimer = null;
+        }
+        this.chart.resumeResize();
       }
-    }, durationMs + 30);
+    };
+
+    const handleTransitionStart = (e: TransitionEvent) => {
+      if (
+        e.propertyName === 'width' ||
+        e.propertyName === 'min-width' ||
+        e.propertyName === 'max-width' ||
+        e.propertyName === 'height'
+      ) {
+        this.chart.pauseResize();
+      }
+    };
+
+    const watchlistPanel = document.querySelector<HTMLElement>('.panel.exness-watchlist');
+    const tradePanel = document.getElementById('trade-panel');
+    const drawerContainer = document.getElementById('trading-drawer-container');
+
+    const elements = [watchlistPanel, tradePanel, drawerContainer];
+    elements.forEach((el) => {
+      if (!el) return;
+      el.addEventListener('transitionrun', handleTransitionStart as EventListener);
+      el.addEventListener('transitionstart', handleTransitionStart as EventListener);
+      el.addEventListener('transitionend', handleTransitionEnd as EventListener);
+      el.addEventListener('transitioncancel', handleTransitionEnd as EventListener);
+    });
   }
 
   private stateUpdateTimer: ReturnType<typeof setTimeout> | null = null;
