@@ -897,20 +897,39 @@ export class App {
 
   private wireKeyboardShortcuts(): void {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
-      // Ignore shortcut keys when focus is in an input or select
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') {
+      // Ignore if event was already handled by drawing shortcuts or other handlers
+      if (e.defaultPrevented) {
         return;
       }
 
-      if (e.code === 'Space') {
+      // Ignore shortcut keys when focus is in an input or select
+      const activeEl = document.activeElement;
+      const activeTag = (activeEl?.tagName || '').toLowerCase();
+      if (
+        activeTag === 'input' ||
+        activeTag === 'textarea' ||
+        activeTag === 'select' ||
+        (activeEl as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
+      // If drawing engine has selected drawings, let arrow keys nudge drawings instead of stepping replay
+      const drawingEngine = this.chart.getDrawingEngine();
+      const hasDrawingSelected = Boolean(
+        drawingEngine &&
+          (drawingEngine.getSelectedDrawing() ||
+            drawingEngine.getSelectedDrawingIds().length > 0),
+      );
+
+      if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         void this.replayController.togglePlayPause();
-      } else if (e.code === 'ArrowRight') {
+      } else if (e.code === 'ArrowRight' && !hasDrawingSelected && !e.altKey) {
         e.preventDefault();
         const step = e.ctrlKey ? 24 : e.shiftKey ? 10 : 1;
         void this.replayController.stepForward(step);
-      } else if (e.code === 'ArrowLeft') {
+      } else if (e.code === 'ArrowLeft' && !hasDrawingSelected && !e.altKey) {
         e.preventDefault();
         const step = e.ctrlKey ? 24 : e.shiftKey ? 10 : 1;
         void this.replayController.stepBackward(step);
@@ -923,17 +942,13 @@ export class App {
         if (state) {
           void this.replayController.jumpTo(state.end_index);
         }
-      } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) {
+      } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void this.startRandomReplay();
-      } else if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey)) {
+      } else if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void this.quickSaveSession();
-      } else if (e.code === 'KeyT' && !e.ctrlKey && !e.metaKey) {
-        // Toggle Trade Panel
-        e.preventDefault();
-        this.orderPanel?.toggle();
-      } else if (e.code === 'KeyW' && !e.ctrlKey && !e.metaKey) {
+      } else if (e.code === 'KeyW' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         // Toggle Watchlist
         e.preventDefault();
         this.watchlist?.toggleCollapse();

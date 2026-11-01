@@ -96,7 +96,8 @@ export type DrawingInteractionState =
   | 'DRAWING'
   | 'SELECTED'
   | 'MOVING'
-  | 'EDITING_HANDLE';
+  | 'EDITING_HANDLE'
+  | 'CLONING';
 
 export function getRequiredPointCount(type: DrawingType): number {
   switch (type) {

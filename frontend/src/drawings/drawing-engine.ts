@@ -6,10 +6,13 @@ import {
   calculatePitchfork,
   calculatePositionHandleCoords,
   calculatePositionMetrics,
+  constrainCircle,
   constrainPointAngle,
+  constrainSquare,
   distanceToPoint,
   distanceToRay,
   distanceToSegment,
+  findNearestCandleOHLC,
   formatDuration,
   formatVolume,
   getPipSize,
@@ -18,6 +21,10 @@ import {
   isPointInPolygon,
   isPointInRect,
 } from './drawing-math';
+import {
+  handleDrawingKeyboardShortcut,
+  type IDrawingShortcutTarget,
+} from './drawing-shortcuts';
 import {
   renderDrawingOnCanvas,
   renderFullCrosshair,
@@ -95,12 +102,19 @@ export function findCandleIndexForTimestamp(
   return Math.max(0, Math.min(candles.length - 2, high));
 }
 
-export class DrawingEngine {
+export class DrawingEngine implements IDrawingShortcutTarget {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D | null;
   private drawings: DrawingDefinition[] = [];
   private currentTool: DrawingType = 'cursor';
   private selectedDrawingId: string | null = null;
+  private selectedDrawingIds: Set<string> = new Set();
+  private originalMultiPoints: Map<string, DrawingPoint[]> = new Map();
+  private isHiddenAllDrawings = false;
+  private isMagnetModeEnabled = false;
+  private clipboard: DrawingDefinition[] = [];
+  private undoStack: string[] = [];
+  private redoStack: string[] = [];
   private interactionState: DrawingInteractionState = 'IDLE';
 
   private crosshairPos: { x: number; y: number } | null = null;
@@ -389,8 +403,48 @@ export class DrawingEngine {
     return this.drawings.find((d) => d.id === this.selectedDrawingId) || null;
   }
 
+  recordHistory(): void {
+    this.undoStack.push(JSON.stringify(this.drawings));
+    if (this.undoStack.length > 50) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  undo(): boolean {
+    if (this.undoStack.length === 0) return false;
+    this.redoStack.push(JSON.stringify(this.drawings));
+    const prev = this.undoStack.pop()!;
+    this.drawings = JSON.parse(prev);
+    this.selectDrawing(null);
+    this.redraw();
+    return true;
+  }
+
+  redo(): boolean {
+    if (this.redoStack.length === 0) return false;
+    this.undoStack.push(JSON.stringify(this.drawings));
+    const next = this.redoStack.pop()!;
+    this.drawings = JSON.parse(next);
+    this.selectDrawing(null);
+    this.redraw();
+    return true;
+  }
+
+  canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
   selectDrawing(id: string | null): void {
     this.selectedDrawingId = id;
+    this.selectedDrawingIds.clear();
+    if (id) {
+      this.selectedDrawingIds.add(id);
+    }
     const selected = id ? this.drawings.find((d) => d.id === id) || null : null;
     if (this.currentTool === 'cursor') {
       this.interactionState = selected ? 'SELECTED' : 'IDLE';
@@ -399,6 +453,145 @@ export class DrawingEngine {
     if (this.onSelectionChange) {
       this.onSelectionChange(selected);
     }
+  }
+
+  getSelectedDrawingIds(): string[] {
+    return Array.from(this.selectedDrawingIds);
+  }
+
+  selectDrawings(ids: string[]): void {
+    this.selectedDrawingIds = new Set(ids);
+    this.selectedDrawingId = ids[0] || null;
+    const selected = this.getSelectedDrawing();
+    if (this.currentTool === 'cursor') {
+      this.interactionState = selected ? 'SELECTED' : 'IDLE';
+    }
+    this.redraw();
+    if (this.onSelectionChange) {
+      this.onSelectionChange(selected);
+    }
+  }
+
+  toggleDrawingSelection(id: string): void {
+    if (this.selectedDrawingIds.has(id)) {
+      this.selectedDrawingIds.delete(id);
+      this.selectedDrawingId = this.selectedDrawingIds.values().next().value || null;
+    } else {
+      this.selectedDrawingIds.add(id);
+      this.selectedDrawingId = id;
+    }
+    const selected = this.getSelectedDrawing();
+    if (this.currentTool === 'cursor') {
+      this.interactionState = selected ? 'SELECTED' : 'IDLE';
+    }
+    this.redraw();
+    if (this.onSelectionChange) {
+      this.onSelectionChange(selected);
+    }
+  }
+
+  toggleHideAllDrawings(): boolean {
+    this.isHiddenAllDrawings = !this.isHiddenAllDrawings;
+    this.redraw();
+    return this.isHiddenAllDrawings;
+  }
+
+  isAllDrawingsHidden(): boolean {
+    return this.isHiddenAllDrawings;
+  }
+
+  setHideAllDrawings(hide: boolean): void {
+    this.isHiddenAllDrawings = hide;
+    this.redraw();
+  }
+
+  setMagnetMode(enabled: boolean): void {
+    this.isMagnetModeEnabled = enabled;
+  }
+
+  isMagnetMode(): boolean {
+    return this.isMagnetModeEnabled;
+  }
+
+  toggleMagnetMode(): boolean {
+    this.isMagnetModeEnabled = !this.isMagnetModeEnabled;
+    return this.isMagnetModeEnabled;
+  }
+
+  copySelected(): boolean {
+    const targetIds =
+      this.selectedDrawingIds.size > 0
+        ? this.selectedDrawingIds
+        : this.selectedDrawingId
+          ? new Set([this.selectedDrawingId])
+          : null;
+    if (!targetIds || targetIds.size === 0) return false;
+
+    const toCopy = this.drawings.filter((d) => targetIds.has(d.id));
+    if (toCopy.length === 0) return false;
+
+    this.clipboard = toCopy.map((d) => JSON.parse(JSON.stringify(d)));
+    return true;
+  }
+
+  paste(): DrawingDefinition[] {
+    if (this.clipboard.length === 0) return [];
+    this.recordHistory();
+
+    const tfSec = getTimeframeSeconds(this.currentTimeframe);
+    const pasted: DrawingDefinition[] = [];
+
+    for (const item of this.clipboard) {
+      const clone: DrawingDefinition = {
+        ...item,
+        id: `draw_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        points: item.points.map((p) => ({
+          timestamp: p.timestamp + tfSec * 3,
+          price: p.price,
+        })),
+        style: { ...item.style },
+        locked: false,
+        visible: true,
+      };
+      this.drawings.push(clone);
+      pasted.push(clone);
+      if (this.onSave) this.onSave(clone);
+    }
+
+    this.selectDrawings(pasted.map((d) => d.id));
+    this.redraw();
+    return pasted;
+  }
+
+  nudgeSelected(dBars: number, dTicks: number, stepMultiplier = 1): void {
+    const targetIds =
+      this.selectedDrawingIds.size > 0
+        ? this.selectedDrawingIds
+        : this.selectedDrawingId
+          ? new Set([this.selectedDrawingId])
+          : null;
+    if (!targetIds || targetIds.size === 0) return;
+
+    this.recordHistory();
+
+    const tfSec = getTimeframeSeconds(this.currentTimeframe);
+    const dTime = dBars * tfSec * stepMultiplier;
+
+    const firstDrawing = this.drawings.find((d) => targetIds.has(d.id));
+    const samplePrice = firstDrawing?.points[0]?.price ?? 1.0;
+    const pip = getPipSize(samplePrice);
+    const dPrice = dTicks * pip * stepMultiplier;
+
+    for (const d of this.drawings) {
+      if (!targetIds.has(d.id) || d.locked) continue;
+      for (const p of d.points) {
+        p.timestamp += dTime;
+        p.price += dPrice;
+      }
+      if (this.onSave) this.onSave(d);
+    }
+
+    this.redraw();
   }
 
   getToolDefaultStyle(tool?: DrawingType): DrawingStyle {
@@ -466,6 +659,7 @@ export class DrawingEngine {
     const d = this.drawings.find((item) => item.id === id);
     if (!d) return null;
 
+    this.recordHistory();
     const tfSec = getTimeframeSeconds(this.currentTimeframe);
     const newDrawing: DrawingDefinition = {
       ...d,
@@ -486,10 +680,17 @@ export class DrawingEngine {
   deleteDrawing(id: string): void {
     const idx = this.drawings.findIndex((d) => d.id === id);
     if (idx >= 0) {
+      this.recordHistory();
       this.drawings.splice(idx, 1);
+      this.selectedDrawingIds.delete(id);
       if (this.selectedDrawingId === id) {
-        this.selectedDrawingId = null;
-        if (this.onSelectionChange) this.onSelectionChange(null);
+        this.selectedDrawingId = this.selectedDrawingIds.values().next().value || null;
+        if (this.onSelectionChange) {
+          const newSel = this.selectedDrawingId
+            ? this.drawings.find((d) => d.id === this.selectedDrawingId) || null
+            : null;
+          this.onSelectionChange(newSel);
+        }
       }
       this.redraw();
       if (this.onDelete) this.onDelete(id);
@@ -497,9 +698,27 @@ export class DrawingEngine {
   }
 
   deleteSelected(): void {
-    if (this.selectedDrawingId) {
-      this.deleteDrawing(this.selectedDrawingId);
+    const ids =
+      this.selectedDrawingIds.size > 0
+        ? Array.from(this.selectedDrawingIds)
+        : this.selectedDrawingId
+          ? [this.selectedDrawingId]
+          : [];
+    if (ids.length === 0) return;
+
+    this.recordHistory();
+    for (const id of ids) {
+      const idx = this.drawings.findIndex((d) => d.id === id);
+      if (idx >= 0) {
+        this.drawings.splice(idx, 1);
+        if (this.onDelete) this.onDelete(id);
+      }
     }
+    this.selectedDrawingIds.clear();
+    this.selectedDrawingId = null;
+    this.interactionState = 'IDLE';
+    this.redraw();
+    if (this.onSelectionChange) this.onSelectionChange(null);
   }
 
   clearAll(): void {
@@ -902,42 +1121,69 @@ export class DrawingEngine {
   private getEffectivePointerPos(
     pos: { x: number; y: number },
     shiftPressed: boolean,
+    modPressed = false,
   ): { x: number; y: number } {
-    if (!shiftPressed) return pos;
+    let result = pos;
 
-    if (this.interactionState === 'DRAWING' && this.draftPoints.length > 0) {
-      const anchorIdx = Math.max(0, this.draftPoints.length - 2);
-      const anchorChart = this.draftPoints[anchorIdx];
-      if (anchorChart) {
-        const anchorPix = this.chartToPixel(anchorChart);
-        if (anchorPix) {
-          return constrainPointAngle(pos, anchorPix);
-        }
-      }
-    }
-
-    if (
-      this.interactionState === 'EDITING_HANDLE' &&
-      this.selectedDrawingId &&
-      this.activeHandleIndex >= 0
-    ) {
-      const selected = this.drawings.find((d) => d.id === this.selectedDrawingId);
-      if (selected && selected.points.length > 0) {
-        const anchorIdx =
-          this.activeHandleIndex === 0
-            ? Math.min(1, selected.points.length - 1)
-            : Math.max(0, this.activeHandleIndex - 1);
-        const anchorChart = selected.points[anchorIdx];
+    if (shiftPressed) {
+      if (this.interactionState === 'DRAWING' && this.draftPoints.length > 0) {
+        const anchorIdx = Math.max(0, this.draftPoints.length - 2);
+        const anchorChart = this.draftPoints[anchorIdx];
         if (anchorChart) {
           const anchorPix = this.chartToPixel(anchorChart);
           if (anchorPix) {
-            return constrainPointAngle(pos, anchorPix);
+            if (this.currentTool === 'rectangle' || this.currentTool === 'gann_box') {
+              result = constrainSquare(pos, anchorPix);
+            } else if (this.currentTool === 'ellipse' || this.currentTool === 'circle') {
+              result = constrainCircle(pos, anchorPix);
+            } else {
+              result = constrainPointAngle(pos, anchorPix);
+            }
+          }
+        }
+      } else if (
+        this.interactionState === 'EDITING_HANDLE' &&
+        this.selectedDrawingId &&
+        this.activeHandleIndex >= 0
+      ) {
+        const selected = this.drawings.find((d) => d.id === this.selectedDrawingId);
+        if (selected && selected.points.length > 0) {
+          const anchorIdx =
+            this.activeHandleIndex === 0
+              ? Math.min(1, selected.points.length - 1)
+              : Math.max(0, this.activeHandleIndex - 1);
+          const anchorChart = selected.points[anchorIdx];
+          if (anchorChart) {
+            const anchorPix = this.chartToPixel(anchorChart);
+            if (anchorPix) {
+              if (selected.type === 'rectangle' || selected.type === 'gann_box') {
+                result = constrainSquare(pos, anchorPix);
+              } else if (selected.type === 'ellipse' || selected.type === 'circle') {
+                result = constrainCircle(pos, anchorPix);
+              } else {
+                result = constrainPointAngle(pos, anchorPix);
+              }
+            }
           }
         }
       }
     }
 
-    return pos;
+    const shouldMagnet = this.isMagnetModeEnabled !== Boolean(modPressed);
+    if (shouldMagnet && this.candleData.length > 0) {
+      const chartPos = this.pixelToChart(result.x, result.y);
+      if (chartPos) {
+        const snapped = findNearestCandleOHLC(chartPos, this.candleData);
+        if (snapped) {
+          const snappedPix = this.chartToPixel(snapped);
+          if (snappedPix) {
+            result = snappedPix;
+          }
+        }
+      }
+    }
+
+    return result;
   }
 
   private reprocessPointerPosition(rawPos: { x: number; y: number }): void {
@@ -1112,9 +1358,21 @@ export class DrawingEngine {
   /** Decide whether the engine consumes this pointerdown; when it does,
    *  the event is stopped so the chart never starts panning. */
   private handleContainerPointerDown(e: PointerEvent): void {
-    if (e.button !== 0) return;
-
     const rawPos = this.getPosFromClient(e.clientX, e.clientY);
+
+    // 0. Middle click (button 1): Delete drawing under pointer (TradingView shortcut)
+    if (e.button === 1) {
+      const hit = this.findDrawingAt(rawPos.x, rawPos.y);
+      if (hit && !hit.locked) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.deleteDrawing(hit.id);
+        return;
+      }
+      return;
+    }
+
+    if (e.button !== 0) return;
 
     const renderCtx: RenderContext = {
       ctx: this.ctx as CanvasRenderingContext2D,
@@ -1124,7 +1382,7 @@ export class DrawingEngine {
       pixelToChart: (x, y) => this.pixelToChart(x, y),
     };
 
-    // 0. Position overlay (close buttons / SL-TP drag handles)
+    // 1. Position overlay (close buttons / SL-TP drag handles)
     if (this.positionOverlay.handlePointerDown(rawPos.x, rawPos.y, renderCtx)) {
       if (this.positionOverlay.getActiveDrag()) {
         this.setChartScrollEnabled(false);
@@ -1139,7 +1397,7 @@ export class DrawingEngine {
       return;
     }
 
-    // 1. Armed drawing tool -> always consume (chart must not pan while drawing)
+    // 2. Armed drawing tool -> always consume (chart must not pan while drawing)
     if (this.currentTool !== 'cursor') {
       e.preventDefault();
       e.stopPropagation();
@@ -1148,7 +1406,21 @@ export class DrawingEngine {
       return;
     }
 
-    // 2. Cursor mode interactions with drawings
+    // 3. Quick Measure via Shift + Click when tool is cursor (TradingView shortcut)
+    if (e.shiftKey && this.currentTool === 'cursor') {
+      e.preventDefault();
+      e.stopPropagation();
+      this.setTool('measurement');
+      this.onToolPointerDown(e, rawPos);
+      return;
+    }
+
+    const isMac =
+      typeof navigator !== 'undefined' &&
+      /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    const modKey = isMac ? e.metaKey : e.ctrlKey;
+
+    // 4. Cursor mode interactions with drawings
     if (this.selectedDrawingId) {
       const selected = this.drawings.find((d) => d.id === this.selectedDrawingId);
       if (selected && !selected.locked && selected.visible !== false) {
@@ -1172,12 +1444,44 @@ export class DrawingEngine {
         if (this.hitTestDrawing(selected, rawPos.x, rawPos.y)) {
           e.preventDefault();
           e.stopPropagation();
+
+          if (modKey) {
+            // Ctrl/Cmd + Drag on selected drawing -> Clone it! (TradingView shortcut)
+            const cloned = this.duplicateDrawing(selected.id);
+            if (cloned) {
+              this.setChartScrollEnabled(false);
+              this.interactionState = 'CLONING';
+              this.dragStartPos = rawPos;
+              this.originalPoints = cloned.points.map((p) => ({ ...p }));
+              this.pointerDownPos = rawPos;
+              this.pointerDragDist = 0;
+              this.originalMultiPoints.clear();
+              this.originalMultiPoints.set(cloned.id, cloned.points.map((p) => ({ ...p })));
+              try {
+                this.container.setPointerCapture(e.pointerId);
+              } catch {
+                // ignore
+              }
+              return;
+            }
+          }
+
           this.setChartScrollEnabled(false);
           this.interactionState = 'MOVING';
           this.dragStartPos = rawPos;
           this.originalPoints = selected.points.map((p) => ({ ...p }));
           this.pointerDownPos = rawPos;
           this.pointerDragDist = 0;
+          this.originalMultiPoints.clear();
+          for (const id of this.selectedDrawingIds) {
+            const d = this.drawings.find((item) => item.id === id);
+            if (d && !d.locked) {
+              this.originalMultiPoints.set(id, d.points.map((p) => ({ ...p })));
+            }
+          }
+          if (!this.originalMultiPoints.has(selected.id)) {
+            this.originalMultiPoints.set(selected.id, selected.points.map((p) => ({ ...p })));
+          }
           try {
             this.container.setPointerCapture(e.pointerId);
           } catch {
@@ -1188,11 +1492,18 @@ export class DrawingEngine {
       }
     }
 
-    // 3. Selecting a different drawing (also immediately arm moving for smooth drag)
+    // 5. Selecting a different drawing
     const hit = this.findDrawingAt(rawPos.x, rawPos.y);
     if (hit) {
       e.preventDefault();
       e.stopPropagation();
+
+      if (modKey) {
+        // Multi-select toggle (TradingView shortcut)
+        this.toggleDrawingSelection(hit.id);
+        return;
+      }
+
       this.selectDrawing(hit.id);
       if (!hit.locked && hit.visible !== false) {
         this.setChartScrollEnabled(false);
@@ -1201,6 +1512,8 @@ export class DrawingEngine {
         this.originalPoints = hit.points.map((p) => ({ ...p }));
         this.pointerDownPos = rawPos;
         this.pointerDragDist = 0;
+        this.originalMultiPoints.clear();
+        this.originalMultiPoints.set(hit.id, hit.points.map((p) => ({ ...p })));
         try {
           this.container.setPointerCapture(e.pointerId);
         } catch {
@@ -1210,7 +1523,7 @@ export class DrawingEngine {
       return;
     }
 
-    // 4. Empty space -> let the chart pan; just clear selection.
+    // 6. Empty space -> let the chart pan; just clear selection.
     this.selectDrawing(null);
     this.setChartScrollEnabled(true);
   }
@@ -1355,28 +1668,8 @@ export class DrawingEngine {
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      const activeEl = document.activeElement;
-      if (
-        activeEl &&
-        (activeEl.tagName === 'INPUT' ||
-          activeEl.tagName === 'TEXTAREA' ||
-          (activeEl as HTMLElement).isContentEditable)
-      ) {
-        return;
-      }
-      if (this.selectedDrawingId) {
-        this.deleteSelected();
-      }
-    } else if (e.key === 'Escape') {
-      if (this.interactionState === 'DRAWING') {
-        this.draftPoints = [];
-        this.setTool('cursor');
-      } else if (this.currentTool !== 'cursor') {
-        this.setTool('cursor');
-      } else if (this.selectedDrawingId) {
-        this.selectDrawing(null);
-      }
+    if (handleDrawingKeyboardShortcut(e, this)) {
+      return;
     }
   };
 
@@ -1393,11 +1686,16 @@ export class DrawingEngine {
   }
 
   /** Abort any in-flight interaction (pointer cancellation, OS gestures). */
-  private cancelInteraction(): void {
+  cancelInteraction(): void {
+    if (this.interactionState === 'CLONING' && this.selectedDrawingId) {
+      const cloneId = this.selectedDrawingId;
+      this.deleteDrawing(cloneId);
+    }
     const wasDrawing = this.interactionState === 'DRAWING' && this.draftPoints.length > 0;
     this.draftPoints = [];
     this.dragStartPos = null;
     this.originalPoints = [];
+    this.originalMultiPoints.clear();
     this.pointerDownPos = null;
     this.activeHandleIndex = -1;
     this.crosshairPos = null;
@@ -1419,12 +1717,17 @@ export class DrawingEngine {
 
   private onPointerMove(e: PointerEvent, rawPosIn?: { x: number; y: number }): void {
     this.isShiftPressed = e.shiftKey;
+    const isMac =
+      typeof navigator !== 'undefined' &&
+      /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    const modKey = isMac ? e.metaKey : e.ctrlKey;
+
     const rawPos = rawPosIn ?? this.getCanvasPos(e);
     this.lastPointerPos = rawPos;
-    let pos = this.getEffectivePointerPos(rawPos, e.shiftKey);
+    let pos = this.getEffectivePointerPos(rawPos, e.shiftKey, modKey);
 
     if (
-      this.interactionState === 'MOVING' &&
+      (this.interactionState === 'MOVING' || this.interactionState === 'CLONING') &&
       e.shiftKey &&
       this.dragStartPos &&
       this.originalPoints.length > 0
@@ -1482,7 +1785,7 @@ export class DrawingEngine {
 
     // Move drawing
     if (
-      this.interactionState === 'MOVING' &&
+      (this.interactionState === 'MOVING' || this.interactionState === 'CLONING') &&
       this.selectedDrawingId &&
       this.dragStartPos &&
       this.originalPoints.length > 0
@@ -1502,10 +1805,21 @@ export class DrawingEngine {
       const dPrice = newP0Chart.price - this.originalPoints[0].price;
       const dTime = newP0Chart.timestamp - this.originalPoints[0].timestamp;
 
-      selected.points = this.originalPoints.map((p) => ({
-        timestamp: p.timestamp + dTime,
-        price: p.price + dPrice,
-      }));
+      if (this.originalMultiPoints.size > 1) {
+        for (const [id, origPts] of this.originalMultiPoints.entries()) {
+          const d = this.drawings.find((item) => item.id === id);
+          if (!d || d.locked) continue;
+          d.points = origPts.map((p) => ({
+            timestamp: p.timestamp + dTime,
+            price: p.price + dPrice,
+          }));
+        }
+      } else {
+        selected.points = this.originalPoints.map((p) => ({
+          timestamp: p.timestamp + dTime,
+          price: p.price + dPrice,
+        }));
+      }
 
       this.redraw();
       return;
@@ -1676,17 +1990,29 @@ export class DrawingEngine {
 
     if (
       this.interactionState === 'MOVING' ||
-      this.interactionState === 'EDITING_HANDLE'
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.interactionState === 'CLONING'
     ) {
-      if (this.selectedDrawingId && this.onSave) {
-        const d = this.drawings.find((item) => item.id === this.selectedDrawingId);
-        if (d) this.onSave(d);
+      if (this.pointerDragDist > 3) {
+        this.recordHistory();
+        if (this.onSave) {
+          if (this.originalMultiPoints.size > 0) {
+            for (const id of this.originalMultiPoints.keys()) {
+              const d = this.drawings.find((item) => item.id === id);
+              if (d) this.onSave(d);
+            }
+          } else if (this.selectedDrawingId) {
+            const d = this.drawings.find((item) => item.id === this.selectedDrawingId);
+            if (d) this.onSave(d);
+          }
+        }
       }
       this.interactionState = this.selectedDrawingId ? 'SELECTED' : 'IDLE';
     }
 
     this.dragStartPos = null;
     this.originalPoints = [];
+    this.originalMultiPoints.clear();
     this.pointerDownPos = null;
     this.activeHandleIndex = -1;
 
@@ -1699,6 +2025,7 @@ export class DrawingEngine {
   }
 
   private commitNewDrawing(points: DrawingPoint[]): void {
+    this.recordHistory();
     const isAnnotationText = this.currentTool === 'text' || this.currentTool === 'callout';
     const tfSec = getTimeframeSeconds(this.currentTimeframe);
 
@@ -1782,7 +2109,8 @@ export class DrawingEngine {
 
   // -- Hit Testing --------------------------------------------------
 
-  private findDrawingAt(px: number, py: number): DrawingDefinition | null {
+  findDrawingAt(px: number, py: number): DrawingDefinition | null {
+    if (this.isHiddenAllDrawings) return null;
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
       if (d.visible && this.hitTestDrawing(d, px, py)) {
@@ -2112,9 +2440,13 @@ export class DrawingEngine {
     };
 
     // 1. Render committed drawings
-    for (const d of this.drawings) {
-      if (d.visible) {
-        renderDrawingOnCanvas(d, d.id === this.selectedDrawingId, rc);
+    if (!this.isHiddenAllDrawings) {
+      for (const d of this.drawings) {
+        if (d.visible) {
+          const isSelected =
+            this.selectedDrawingIds.has(d.id) || d.id === this.selectedDrawingId;
+          renderDrawingOnCanvas(d, isSelected, rc);
+        }
       }
     }
 

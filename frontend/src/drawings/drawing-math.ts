@@ -1,3 +1,4 @@
+import type { CompactCandleRow } from '../chart/candle-series';
 export function distanceToPoint(px: number, py: number, x: number, y: number): number {
   const dx = px - x;
   const dy = py - y;
@@ -622,3 +623,90 @@ export function calculatePositionHandleCoords(
 }
 
 
+
+
+export function constrainSquare(
+  current: { x: number; y: number },
+  anchor: { x: number; y: number },
+): { x: number; y: number } {
+  const dx = current.x - anchor.x;
+  const dy = current.y - anchor.y;
+  if (dx === 0 && dy === 0) return { ...current };
+
+  const size = Math.max(Math.abs(dx), Math.abs(dy));
+  const sx = dx >= 0 ? 1 : -1;
+  const sy = dy >= 0 ? 1 : -1;
+
+  return {
+    x: anchor.x + sx * size,
+    y: anchor.y + sy * size,
+  };
+}
+
+export function constrainCircle(
+  current: { x: number; y: number },
+  anchor: { x: number; y: number },
+): { x: number; y: number } {
+  return constrainSquare(current, anchor);
+}
+
+export function findNearestCandleOHLC(
+  target: { timestamp: number; price: number },
+  candles: CompactCandleRow[],
+): { timestamp: number; price: number } | null {
+  if (!candles || candles.length === 0) return null;
+
+  let low = 0;
+  let high = candles.length - 1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const midTime = candles[mid][0];
+    if (midTime === target.timestamp) {
+      low = mid;
+      break;
+    } else if (midTime < target.timestamp) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  const candidates: number[] = [];
+  for (let i = Math.max(0, low - 2); i <= Math.min(candles.length - 1, low + 2); i++) {
+    candidates.push(i);
+  }
+
+  if (candidates.length === 0) return null;
+
+  let bestCandle = candles[candidates[0]];
+  let minTimeDist = Math.abs(bestCandle[0] - target.timestamp);
+
+  for (const idx of candidates) {
+    const c = candles[idx];
+    const dist = Math.abs(c[0] - target.timestamp);
+    if (dist < minTimeDist) {
+      minTimeDist = dist;
+      bestCandle = c;
+    }
+  }
+
+  const [, open, highPrice, lowPrice, close] = bestCandle;
+  const ohlc = [open, highPrice, lowPrice, close];
+
+  let nearestPrice = ohlc[0];
+  let minPriceDiff = Math.abs(ohlc[0] - target.price);
+
+  for (let i = 1; i < ohlc.length; i++) {
+    const diff = Math.abs(ohlc[i] - target.price);
+    if (diff < minPriceDiff) {
+      minPriceDiff = diff;
+      nearestPrice = ohlc[i];
+    }
+  }
+
+  return {
+    timestamp: bestCandle[0],
+    price: nearestPrice,
+  };
+}
