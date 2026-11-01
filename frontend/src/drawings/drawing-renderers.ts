@@ -9,6 +9,7 @@ import {
   calculatePositionHandleCoords,
   calculatePositionMetrics,
   drawCatmullRomSpline,
+  drawMidpointQuadraticSpline,
   formatCrosshairPrice,
   formatCrosshairTime,
   formatDuration,
@@ -921,7 +922,7 @@ export function renderDrawingOnCanvas(
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        const sPts = smoothFreehandPoints(pts, 2);
+        const sPts = smoothFreehandPoints(pts, 1);
 
         ctx.beginPath();
         if (sPts.length === 1) {
@@ -929,7 +930,7 @@ export function renderDrawingOnCanvas(
           ctx.fillStyle = d.style.color || '#2962ff';
           ctx.fill();
         } else {
-          drawCatmullRomSpline(ctx, sPts, 0.5);
+          drawMidpointQuadraticSpline(ctx, sPts);
           if (d.style.fillColor && d.style.fillColor !== 'transparent') {
             ctx.fillStyle = d.style.fillColor;
             ctx.fill();
@@ -957,7 +958,7 @@ export function renderDrawingOnCanvas(
           ctx.fillStyle = d.style.color || '#2962ff';
           ctx.fill();
         } else {
-          drawCatmullRomSpline(ctx, sPts, 0.4);
+          drawMidpointQuadraticSpline(ctx, sPts);
           ctx.stroke();
         }
         ctx.restore();

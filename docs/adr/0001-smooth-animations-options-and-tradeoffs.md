@@ -1,6 +1,6 @@
 # ADR 0001: Smooth Animations, Options, and Tradeoffs
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Date**: 2026-11-01
 - **Branch**: `animations-improvement`
 - **Context**: Trading Chart Replay Terminal (`tv_chart_replay`)

@@ -459,6 +459,26 @@ export class ChartManager {
   }
 
   /**
+   * Toggles mouse-drag / touch panning on the chart.
+   * Useful when drawing shapes or dragging objects/handles to prevent dual-motion chart panning.
+   */
+  setScrollEnabled(enabled: boolean): void {
+    if (!this.chart) return;
+    try {
+      this.chart.applyOptions({
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: enabled,
+          horzTouchDrag: enabled,
+          vertTouchDrag: enabled,
+        },
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
    * Add a line series for an indicator (overlay or sub-pane).
    */
   addIndicatorLineSeries(id: string, color: string, overlay: boolean, title: string): void {

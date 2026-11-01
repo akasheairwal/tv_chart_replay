@@ -139,6 +139,11 @@ export class DrawingEngine {
   private onContainerPointerLeave = (): void => this.onPointerLeave();
   private onContainerPointerEnter = (e: PointerEvent): void => this.onPointerEnter(e);
   private onContainerDblClick = (e: MouseEvent): void => this.handleDblClick(e);
+  private onContainerMouseDown = (e: MouseEvent): void => this.handleContainerMouseDown(e);
+  private onContainerMouseMove = (e: MouseEvent): void => this.handleContainerMouseMove(e);
+  private onContainerMouseUp = (e: MouseEvent): void => this.handleContainerMouseUp(e);
+  private onContainerTouchStart = (e: TouchEvent): void => this.handleContainerTouchStart(e);
+  private onContainerTouchMove = (e: TouchEvent): void => this.handleContainerTouchMove(e);
   private onWindowKeyDownShift = (e: KeyboardEvent): void => {
     if (e.key === 'Shift' && !this.isShiftPressed) {
       this.isShiftPressed = true;
@@ -321,9 +326,11 @@ export class DrawingEngine {
       this.interactionState = 'IDLE';
       this.container.style.cursor = '';
       this.crosshairPos = null;
+      this.setChartScrollEnabled(true);
     } else {
       this.interactionState = 'TOOL_SELECTED';
       this.container.style.cursor = 'crosshair';
+      this.setChartScrollEnabled(false);
     }
     // The overlay canvas is a pure render surface: it NEVER captures
     // pointer/wheel input. Interaction routing happens on the container in
@@ -337,6 +344,26 @@ export class DrawingEngine {
 
   getCurrentTool(): DrawingType {
     return this.currentTool;
+  }
+
+  /**
+   * Toggles mouse-drag / touch panning on the chart.
+   * Suppresses chart panning while drawing or dragging overlay objects.
+   */
+  private setChartScrollEnabled(enabled: boolean): void {
+    if (!this.chart || typeof this.chart.applyOptions !== 'function') return;
+    try {
+      this.chart.applyOptions({
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: enabled,
+          horzTouchDrag: enabled,
+          vertTouchDrag: enabled,
+        },
+      });
+    } catch {
+      // ignore
+    }
   }
 
   setDrawings(drawings: DrawingDefinition[]): void {
@@ -480,6 +507,9 @@ export class DrawingEngine {
     this.drawings = [];
     this.selectedDrawingId = null;
     this.interactionState = 'IDLE';
+    if (this.currentTool === 'cursor') {
+      this.setChartScrollEnabled(true);
+    }
     this.redraw();
     if (this.onSelectionChange) this.onSelectionChange(null);
     for (const id of ids) {
@@ -954,6 +984,11 @@ export class DrawingEngine {
     this.container.addEventListener('pointerleave', this.onContainerPointerLeave, true);
     this.container.addEventListener('dblclick', this.onContainerDblClick, true);
     this.container.addEventListener('wheel', this.onWheelCapture, { capture: true, passive: false });
+    this.container.addEventListener('mousedown', this.onContainerMouseDown, true);
+    this.container.addEventListener('mousemove', this.onContainerMouseMove, true);
+    this.container.addEventListener('mouseup', this.onContainerMouseUp, true);
+    this.container.addEventListener('touchstart', this.onContainerTouchStart, { capture: true, passive: false });
+    this.container.addEventListener('touchmove', this.onContainerTouchMove, { capture: true, passive: false });
 
     const timeScale = this.chart.timeScale?.();
     if (timeScale) {
@@ -990,10 +1025,87 @@ export class DrawingEngine {
     const hit = this.findDrawingAt(pos.x, pos.y);
     if (hit) {
       e.stopPropagation();
+      e.preventDefault();
       this.selectDrawing(hit.id);
       if (this.onOpenDrawingSettings) {
         this.onOpenDrawingSettings(hit);
       }
+    }
+  }
+
+  private handleContainerMouseDown(e: MouseEvent): void {
+    if (e.button !== 0) return;
+    const rawPos = this.getPosFromClient(e.clientX, e.clientY);
+    const interacting =
+      this.interactionState === 'DRAWING' ||
+      this.interactionState === 'MOVING' ||
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.positionOverlay.getActiveDrag() !== null ||
+      this.currentTool !== 'cursor';
+
+    if (interacting) {
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+
+    const target = this.isPointerOverInteractiveTarget(rawPos.x, rawPos.y);
+    if (target.hit) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }
+
+  private handleContainerMouseMove(e: MouseEvent): void {
+    const interacting =
+      this.interactionState === 'DRAWING' ||
+      this.interactionState === 'MOVING' ||
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.positionOverlay.getActiveDrag() !== null;
+
+    if (interacting) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }
+
+  private handleContainerMouseUp(e: MouseEvent): void {
+    const interacting =
+      this.interactionState === 'DRAWING' ||
+      this.interactionState === 'MOVING' ||
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.positionOverlay.getActiveDrag() !== null;
+
+    if (interacting) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }
+
+  private handleContainerTouchStart(e: TouchEvent): void {
+    const interacting =
+      this.interactionState === 'DRAWING' ||
+      this.interactionState === 'MOVING' ||
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.positionOverlay.getActiveDrag() !== null ||
+      this.currentTool !== 'cursor';
+
+    if (interacting) {
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
+    }
+  }
+
+  private handleContainerTouchMove(e: TouchEvent): void {
+    const interacting =
+      this.interactionState === 'DRAWING' ||
+      this.interactionState === 'MOVING' ||
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.positionOverlay.getActiveDrag() !== null;
+
+    if (interacting) {
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
     }
   }
 
@@ -1015,19 +1127,23 @@ export class DrawingEngine {
     // 0. Position overlay (close buttons / SL-TP drag handles)
     if (this.positionOverlay.handlePointerDown(rawPos.x, rawPos.y, renderCtx)) {
       if (this.positionOverlay.getActiveDrag()) {
+        this.setChartScrollEnabled(false);
         try {
           this.container.setPointerCapture(e.pointerId);
         } catch {
           // ignore
         }
       }
+      e.preventDefault();
       e.stopPropagation();
       return;
     }
 
     // 1. Armed drawing tool -> always consume (chart must not pan while drawing)
     if (this.currentTool !== 'cursor') {
+      e.preventDefault();
       e.stopPropagation();
+      this.setChartScrollEnabled(false);
       this.onToolPointerDown(e, rawPos);
       return;
     }
@@ -1038,7 +1154,9 @@ export class DrawingEngine {
       if (selected && !selected.locked && selected.visible !== false) {
         const handleIdx = this.hitTestHandles(selected, rawPos.x, rawPos.y);
         if (handleIdx >= 0) {
+          e.preventDefault();
           e.stopPropagation();
+          this.setChartScrollEnabled(false);
           this.interactionState = 'EDITING_HANDLE';
           this.activeHandleIndex = handleIdx;
           this.pointerDownPos = rawPos;
@@ -1052,7 +1170,9 @@ export class DrawingEngine {
         }
 
         if (this.hitTestDrawing(selected, rawPos.x, rawPos.y)) {
+          e.preventDefault();
           e.stopPropagation();
+          this.setChartScrollEnabled(false);
           this.interactionState = 'MOVING';
           this.dragStartPos = rawPos;
           this.originalPoints = selected.points.map((p) => ({ ...p }));
@@ -1068,16 +1188,31 @@ export class DrawingEngine {
       }
     }
 
-    // 3. Selecting a different drawing
+    // 3. Selecting a different drawing (also immediately arm moving for smooth drag)
     const hit = this.findDrawingAt(rawPos.x, rawPos.y);
     if (hit) {
+      e.preventDefault();
       e.stopPropagation();
       this.selectDrawing(hit.id);
+      if (!hit.locked && hit.visible !== false) {
+        this.setChartScrollEnabled(false);
+        this.interactionState = 'MOVING';
+        this.dragStartPos = rawPos;
+        this.originalPoints = hit.points.map((p) => ({ ...p }));
+        this.pointerDownPos = rawPos;
+        this.pointerDragDist = 0;
+        try {
+          this.container.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
+      }
       return;
     }
 
     // 4. Empty space -> let the chart pan; just clear selection.
     this.selectDrawing(null);
+    this.setChartScrollEnabled(true);
   }
 
   private onToolPointerDown(e: PointerEvent, rawPos: { x: number; y: number }): void {
@@ -1146,6 +1281,23 @@ export class DrawingEngine {
     }
   }
 
+  /** Append a freehand point if distance from last point >= 2px */
+  private appendFreehandPoint(pos: { x: number; y: number }): void {
+    const chartPos = this.pixelToChart(pos.x, pos.y);
+    if (!chartPos) return;
+
+    if (this.draftPoints.length === 0) {
+      this.draftPoints.push(chartPos);
+      return;
+    }
+
+    const lastPt = this.draftPoints[this.draftPoints.length - 1];
+    const lastPix = this.chartToPixel(lastPt);
+    if (!lastPix || Math.hypot(pos.x - lastPix.x, pos.y - lastPix.y) >= 2) {
+      this.draftPoints.push(chartPos);
+    }
+  }
+
   private handleContainerPointerMove(e: PointerEvent): void {
     const rawPos = this.getPosFromClient(e.clientX, e.clientY);
     const interacting =
@@ -1154,12 +1306,35 @@ export class DrawingEngine {
       this.interactionState === 'EDITING_HANDLE' ||
       this.positionOverlay.getActiveDrag() !== null;
 
-    if (!interacting && this.currentTool === 'cursor' && e.buttons === 0) {
+    if (interacting) {
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (this.currentTool !== 'cursor') {
+      if (e.buttons > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    } else if (e.buttons === 0) {
       // Pure hover in cursor mode: update cursor affordance only. No
       // pointerEvents toggling - hit-testing is done here directly.
       const target = this.isPointerOverInteractiveTarget(rawPos.x, rawPos.y);
       this.container.style.cursor = target.cursor;
       return;
+    }
+
+    // Coalesced sub-pixel pointer sampling for freehand tools (ADR 0001 - Domain 4B)
+    if (
+      this.interactionState === 'DRAWING' &&
+      getRequiredPointCount(this.currentTool) === -1 &&
+      typeof e.getCoalescedEvents === 'function'
+    ) {
+      const coalesced = e.getCoalescedEvents();
+      if (coalesced && coalesced.length > 1) {
+        for (let i = 0; i < coalesced.length - 1; i++) {
+          const subPos = this.getPosFromClient(coalesced[i].clientX, coalesced[i].clientY);
+          this.appendFreehandPoint(subPos);
+        }
+      }
     }
 
     this.onPointerMove(e, rawPos);
@@ -1233,6 +1408,9 @@ export class DrawingEngine {
         this.interactionState = this.selectedDrawingId ? 'SELECTED' : 'IDLE';
       }
     }
+    if (this.currentTool === 'cursor') {
+      this.setChartScrollEnabled(true);
+    }
     if (wasDrawing) {
       // A half-drawn ghost must not silently survive as a stale preview.
       this.redraw();
@@ -1290,15 +1468,11 @@ export class DrawingEngine {
 
     // Update draft during drawing
     if (this.interactionState === 'DRAWING' && this.draftPoints.length > 0) {
-      const chartPos = this.pixelToChart(pos.x, pos.y);
-      if (chartPos) {
-        if (getRequiredPointCount(this.currentTool) === -1) {
-          const lastPt = this.draftPoints[this.draftPoints.length - 1];
-          const lastPix = this.chartToPixel(lastPt);
-          if (!lastPix || Math.hypot(pos.x - lastPix.x, pos.y - lastPix.y) >= 2) {
-            this.draftPoints.push(chartPos);
-          }
-        } else {
+      if (getRequiredPointCount(this.currentTool) === -1) {
+        this.appendFreehandPoint(pos);
+      } else {
+        const chartPos = this.pixelToChart(pos.x, pos.y);
+        if (chartPos) {
           this.draftPoints[this.draftPoints.length - 1] = chartPos;
         }
       }
@@ -1435,6 +1609,17 @@ export class DrawingEngine {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    const wasInteracting =
+      this.interactionState === 'DRAWING' ||
+      this.interactionState === 'MOVING' ||
+      this.interactionState === 'EDITING_HANDLE' ||
+      this.positionOverlay.getActiveDrag() !== null;
+
+    if (wasInteracting) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
     try {
       this.container.releasePointerCapture(e.pointerId);
     } catch {
@@ -1446,6 +1631,9 @@ export class DrawingEngine {
       this.redraw();
       if (this.onModifySlTpRequest) {
         this.onModifySlTpRequest(modifyReq);
+      }
+      if (this.currentTool === 'cursor') {
+        this.setChartScrollEnabled(true);
       }
       return;
     }
@@ -1503,6 +1691,7 @@ export class DrawingEngine {
     this.activeHandleIndex = -1;
 
     if (this.currentTool === 'cursor') {
+      this.setChartScrollEnabled(true);
       const pos = this.getCanvasPos(e);
       const target = this.isPointerOverInteractiveTarget(pos.x, pos.y);
       this.container.style.cursor = target.cursor;
@@ -1968,6 +2157,12 @@ export class DrawingEngine {
     this.container.removeEventListener('pointerleave', this.onContainerPointerLeave, true);
     this.container.removeEventListener('dblclick', this.onContainerDblClick, true);
     this.container.removeEventListener('wheel', this.onWheelCapture, { capture: true });
+    this.container.removeEventListener('mousedown', this.onContainerMouseDown, true);
+    this.container.removeEventListener('mousemove', this.onContainerMouseMove, true);
+    this.container.removeEventListener('mouseup', this.onContainerMouseUp, true);
+    this.container.removeEventListener('touchstart', this.onContainerTouchStart, { capture: true });
+    this.container.removeEventListener('touchmove', this.onContainerTouchMove, { capture: true });
+    this.setChartScrollEnabled(true);
     for (const unsub of this.unsubscribeFns) {
       try {
         unsub();

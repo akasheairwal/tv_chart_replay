@@ -553,6 +553,46 @@ export function drawCatmullRomSpline(
   }
 }
 
+/**
+ * Mid-point Quadratic Bézier Spline Interpolation (ADR 0001 - Domain 4C)
+ *
+ * Smooths freehand pencil and brush strokes by drawing quadratic curves between
+ * consecutive segment mid-points, using stroke points as control vertices.
+ * Guarantees C1 continuity without the loops or overshoots common to high-tension splines.
+ */
+export function drawMidpointQuadraticSpline(
+  ctx: CanvasRenderingContext2D,
+  pts: { x: number; y: number }[],
+): void {
+  if (pts.length < 2) return;
+  if (pts.length === 2) {
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[1].x, pts[1].y);
+    return;
+  }
+
+  ctx.moveTo(pts[0].x, pts[0].y);
+
+  // Initial segment to the first mid-point
+  const mid0x = (pts[0].x + pts[1].x) / 2;
+  const mid0y = (pts[0].y + pts[1].y) / 2;
+  ctx.lineTo(mid0x, mid0y);
+
+  // Intermediate mid-point quadratic curves
+  for (let i = 1; i < pts.length - 1; i++) {
+    const nextMidX = (pts[i].x + pts[i + 1].x) / 2;
+    const nextMidY = (pts[i].y + pts[i + 1].y) / 2;
+    if (typeof ctx.quadraticCurveTo === 'function') {
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, nextMidX, nextMidY);
+    } else {
+      ctx.lineTo(nextMidX, nextMidY);
+    }
+  }
+
+  // Final segment to the last point
+  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+}
+
 export interface PositionHandleCoords {
   leftX: number;
   rightX: number;
