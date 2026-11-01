@@ -12,6 +12,7 @@ export class ReplayBar {
   private randomBtn!: HTMLButtonElement;
   private speedSelect!: HTMLSelectElement;
   private modeSelect!: HTMLSelectElement;
+  private modeBadge!: HTMLElement;
   private lastMode: FormationMode | null = null;
   private jumpInput!: HTMLInputElement;
   private jumpBtn!: HTMLButtonElement;
@@ -121,8 +122,14 @@ export class ReplayBar {
     }
     this.modeSelect.addEventListener('change', () => {
       this.controller.setFormationMode(this.modeSelect.value as FormationMode);
+      this.updateFormationBadge();
     });
     modeWrap.appendChild(this.modeSelect);
+
+    this.modeBadge = document.createElement('span');
+    this.modeBadge.className = 'replay-mode-status-badge';
+    modeWrap.appendChild(this.modeBadge);
+    this.updateFormationBadge();
 
     this.jumpInput = document.createElement('input');
     this.jumpInput.type = 'datetime-local';
@@ -211,6 +218,41 @@ export class ReplayBar {
     if (this.controller.formationMode !== this.lastMode) {
       this.modeSelect.value = this.controller.formationMode;
       this.lastMode = this.controller.formationMode;
+    }
+
+    this.updateFormationBadge();
+  }
+
+  private updateFormationBadge(): void {
+    if (!this.modeBadge) return;
+    const info = this.controller.getFormationStatus();
+
+    if (info.mode === 'ltf') {
+      if (info.isFallback) {
+        this.modeBadge.className = 'replay-mode-status-badge badge-ltf-fallback';
+        this.modeBadge.textContent = 'Fallback: Order Flow';
+        this.modeBadge.title = `Real LTF Fallback: ${info.reason || 'No LTF data available'}. Automatically using Order Flow tape simulation.`;
+      } else if (info.ltfBarsCount > 1) {
+        this.modeBadge.className = 'replay-mode-status-badge badge-ltf-active';
+        this.modeBadge.textContent = `${info.ltfBarsCount} bars (${info.ltfTimeframe || 'LTF'})`;
+        this.modeBadge.title = `Real LTF Active: Replaying ${info.ltfBarsCount} historical ${info.ltfTimeframe || 'LTF'} bars for this candle.`;
+      } else if (info.ltfTimeframe) {
+        this.modeBadge.className = 'replay-mode-status-badge badge-ltf-active';
+        this.modeBadge.textContent = `Ready (${info.ltfTimeframe})`;
+        this.modeBadge.title = `Real LTF: Ready with historical ${info.ltfTimeframe} data.`;
+      } else {
+        this.modeBadge.className = 'replay-mode-status-badge badge-ltf-fallback';
+        this.modeBadge.textContent = info.recommendedLTF ? `No ${info.recommendedLTF}` : 'Base TF';
+        this.modeBadge.title = info.reason || 'Real LTF: No lower-timeframe data loaded.';
+      }
+    } else if (info.mode === 'orderflow') {
+      this.modeBadge.className = 'replay-mode-status-badge badge-orderflow';
+      this.modeBadge.textContent = 'Tape Sim';
+      this.modeBadge.title = 'Order Flow Mode: 4-phase institutional tape simulation & dynamic volume velocity.';
+    } else {
+      this.modeBadge.className = 'replay-mode-status-badge badge-instant';
+      this.modeBadge.textContent = 'Instant';
+      this.modeBadge.title = 'Instant Mode: Intra-bar simulation bypassed for maximum throughput.';
     }
   }
 }

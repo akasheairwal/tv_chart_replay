@@ -40,6 +40,13 @@ export interface MarkovContext {
   volumeProgress: number;
 }
 
+export interface FormationStatus {
+  mode: FormationMode;
+  effectiveMode: FormationMode;
+  isFallback: boolean;
+  ltfBarsCount: number;
+}
+
 export interface SubTickConfig {
   onMicroTick: (candle: CompactCandleRow, price: number) => void;
   onCommit: (candle: CompactCandleRow) => void;
@@ -105,10 +112,17 @@ export class SubTickGenerator {
   private currentTarget: CompactCandleRow | null = null;
   private mode: FormationMode;
   private defaultMinMove: number;
+  private lastStatus: FormationStatus;
 
   constructor(private readonly config: SubTickConfig) {
     this.mode = config.mode ?? 'ltf';
     this.defaultMinMove = config.minMove ?? 0.00001;
+    this.lastStatus = {
+      mode: this.mode,
+      effectiveMode: this.mode,
+      isFallback: false,
+      ltfBarsCount: 0,
+    };
   }
 
   get isRunning(): boolean {
@@ -119,8 +133,20 @@ export class SubTickGenerator {
     return this.mode;
   }
 
+  getFormationStatus(): FormationStatus {
+    return { ...this.lastStatus, mode: this.mode };
+  }
+
   setFormationMode(mode: FormationMode): void {
     this.mode = mode;
+    this.lastStatus.mode = mode;
+    if (mode === 'instant') {
+      this.lastStatus.effectiveMode = 'instant';
+      this.lastStatus.isFallback = false;
+    } else if (mode === 'orderflow') {
+      this.lastStatus.effectiveMode = 'orderflow';
+      this.lastStatus.isFallback = false;
+    }
   }
 
   setMinMove(minMove: number): void {
@@ -374,6 +400,12 @@ export class SubTickGenerator {
       typeof requestAnimationFrame === 'function';
 
     if (!canInterpolate) {
+      this.lastStatus = {
+        mode: this.mode,
+        effectiveMode: 'instant',
+        isFallback: this.mode !== 'instant',
+        ltfBarsCount: 0,
+      };
       this.config.onCommit(candle);
       return;
     }
@@ -420,6 +452,13 @@ export class SubTickGenerator {
       this.mode === 'ltf' && !hasValidLTF
         ? 'orderflow' // Graceful fallback if LTF slice is not downloaded/available
         : this.mode;
+
+    this.lastStatus = {
+      mode: this.mode,
+      effectiveMode,
+      isFallback: this.mode === 'ltf' && !hasValidLTF,
+      ltfBarsCount: ltfSlice ? ltfSlice.length : 0,
+    };
 
     const ltfCtx: LTFContext = {
       slice: ltfSlice || [],

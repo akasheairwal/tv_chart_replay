@@ -3,9 +3,19 @@ import type { CompactCandleRow } from '../chart/candle-series';
 import type { ChartManager } from '../chart/chart-manager';
 import { detectPricePrecision } from '../chart/chart-manager';
 import { getTimeframeSeconds } from '../drawings/drawing-engine';
-import { SubTickGenerator, type FormationMode } from './sub-tick-generator';
+import { SubTickGenerator, type FormationMode, type FormationStatus } from './sub-tick-generator';
 
-export type { FormationMode };
+export type { FormationMode, FormationStatus };
+
+export interface ReplayFormationInfo {
+  mode: FormationMode;
+  effectiveMode: FormationMode;
+  isFallback: boolean;
+  ltfBarsCount: number;
+  ltfTimeframe: string | null;
+  recommendedLTF: string | null;
+  reason?: string;
+}
 
 /**
  * Maps Higher Timeframe (HTF) to recommended Lower Timeframe (LTF) for ground-truth replay.
@@ -215,6 +225,35 @@ export class ReplayController {
     return this.subTickGenerator.getFormationMode();
   }
 
+  getFormationStatus(): ReplayFormationInfo {
+    const status = this.subTickGenerator.getFormationStatus();
+    const htf = this.currentState?.timeframe || '1H';
+    const recommendedLTF = getRecommendedLTFTimeframe(htf);
+
+    let reason: string | undefined;
+    if (this.formationMode === 'ltf') {
+      if (!this.bridge && this.ltfCandles.length === 0) {
+        reason = 'Browser preview mode (no local dataset)';
+      } else if (!recommendedLTF) {
+        reason = `Base timeframe (${htf}) cannot be expanded further`;
+      } else if (this.ltfCandles.length === 0) {
+        reason = `No ${recommendedLTF} data downloaded for ${this.currentState?.symbol || ''}`;
+      } else if (status.isFallback) {
+        reason = `No ${recommendedLTF} bars in candle time range`;
+      }
+    }
+
+    return {
+      mode: this.formationMode,
+      effectiveMode: status.effectiveMode,
+      isFallback: status.isFallback,
+      ltfBarsCount: status.ltfBarsCount,
+      ltfTimeframe: this.ltfTimeframe || recommendedLTF,
+      recommendedLTF,
+      reason,
+    };
+  }
+
   setFormationMode(mode: FormationMode): void {
     this.subTickGenerator.setFormationMode(mode);
     try {
@@ -260,6 +299,39 @@ export class ReplayController {
       total_candles: total,
       visible_count: startIdx + 1,
     };
+
+    // Synthesize realistic 1m lower-timeframe slices for browser preview mode
+    const syntheticLTF: CompactCandleRow[] = [];
+    for (const c of candles) {
+      const [ts, o, h, l, cl, vol] = c;
+      const count = 60; // 60 1m bars per 1H candle
+      const volPerBar = Math.max(1, Math.floor((vol || 600) / count));
+      const isBull = cl >= o;
+      const p1 = isBull ? l : h;
+      const p2 = isBull ? h : l;
+      let prevClose = o;
+
+      for (let i = 0; i < count; i++) {
+        const barTs = ts + i * 60;
+        const progress = i / (count - 1);
+        let target: number;
+        if (progress < 0.25) {
+          target = o + (p1 - o) * (progress / 0.25);
+        } else if (progress < 0.75) {
+          target = p1 + (p2 - p1) * ((progress - 0.25) / 0.5);
+        } else {
+          target = p2 + (cl - p2) * ((progress - 0.75) / 0.25);
+        }
+        const bOpen = prevClose;
+        const bClose = i === count - 1 ? cl : Number(target.toFixed(5));
+        const bHigh = Math.max(bOpen, bClose);
+        const bLow = Math.min(bOpen, bClose);
+        prevClose = bClose;
+        syntheticLTF.push([barTs, bOpen, bHigh, bLow, bClose, volPerBar]);
+      }
+    }
+    this.setLTFCandles(syntheticLTF, '1m');
+
     this.onStateChange(this.currentState);
   }
 
