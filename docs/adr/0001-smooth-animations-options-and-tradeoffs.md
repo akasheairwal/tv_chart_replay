@@ -46,11 +46,13 @@ We need an architectural blueprint detailing the options, technical tradeoffs, a
 
 ### Domain 2: Replay Playback & Candle Forming
 
-| Option                                      | Description                                                                                                                               | Pros                                                                         | Cons                                                                   | Verdict                                  |
-| :------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- | :--------------------------------------------------------------------- | :--------------------------------------- |
-| **2A: Discrete Bar Jumps** _(Current)_      | When candle event arrives, immediately push bar via `series.update()` / `appendCandle()`.                                                 | Zero CPU overhead; simple; accurate timestamps; handles 20x+ speed easily.   | Visually rigid; lacks the organic feel of a live market.               | **Retain for Speeds > 2x**               |
-| **2B: Continuous Micro-Tick Interpolation** | Synthesize intra-bar ticks (Open ➔ Extrema ➔ Close) across the step interval using rAF and price easing.                                  | Authentic TradingView live ticker feel; smooth candle body & wick expansion. | Higher CPU cost; synthetic path may diverge from true tick order flow. | **Adopt for Speeds ≤ 2x**                |
-| **2C: Adaptive Speed-Tiered Playback**      | Dynamically adjust sub-tick frequency based on playback speed (Full interpolation at 0.1x–1x; 2 key points at 2x; discrete jump at > 2x). | Balances visual realism with CPU safety; prevents event backlog.             | Requires playback coordinator logic to calculate sub-tick steps.       | **Adopt as Core Replay Engine Strategy** |
+| Option                                              | Description                                                                                                                               | Pros                                                                         | Cons                                                                   | Verdict                                  |
+| :-------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- | :--------------------------------------------------------------------- | :--------------------------------------- |
+| **2A: Discrete Bar Jumps (Instant)**                | When candle event arrives, immediately push bar via `series.update()` / `appendCandle()` with zero tweening.                               | Zero CPU overhead; simple; accurate timestamps; handles 20x+ speed easily.   | Visually rigid; lacks organic feel of a live market.                   | **Adopt as `Instant` Mode (Speeds > 2x / Max Performance)** |
+| **2B: Continuous Micro-Tick Interpolation**         | Synthesize intra-bar ticks across 4 milestones ($P_0 \to P_1 \to P_2 \to P_3$) using rAF and cubic polynomial easing.                   | Silky TradingView live ticker feel; smooth candle body & wick expansion.     | Overly smooth / predictable; lacks authentic stochastic micro-pullbacks.| **Adopt as `Cinematic (Smooth)` Mode**   |
+| **2C: Brownian Bridge with Pip Quantization**       | Quantize prices to instrument `minMove`; apply bounded zero-envelope stochastic Brownian noise & Poisson tick clustering ($20$–$90\text{ms}$). | Authentic market pulse & realistic micro-pullbacks; zero backend overhead.   | Synthetic intra-bar path rather than true exchange tick tape.          | **Adopt as `Brownian Bridge (Realistic)` Mode** |
+| **2D: Markov Microstructure State Machine**         | 4-state order flow simulation (Accumulation ➔ Impulse Breakout ➔ Wick Exhaustion/Rejection ➔ Consolidation).                              | Institutional tape-reading feel; authentic momentum bursts and wick bounces. | Parameter tuning across asset classes.                                 | **Adopt as `Markov Microstructure` Mode** |
+| **2E: User-Configurable Multi-Mode Performance Toggle** | Expose selectable modes in Replay Bar with persistence; auto-downgrade to Instant at speeds > 2x.                                         | Perfect user agency; caters to scalpers, macro analysts, and backtesters.    | Slight UI addition.                                                    | **Adopt as Core Replay Architecture**    |
 
 ---
 
@@ -95,10 +97,14 @@ We will implement a **3-phase optimization strategy**:
 
 ### Phase 2: Adaptive Replay Interpolation & Smooth Panning
 
-1. **Sub-Tick Generator in `ReplayController`**:
-   - For playback speeds $\le 2\text{x}$, decompose incoming candle steps into 4 interpolated micro-ticks:
-     $$\text{Open} \longrightarrow \text{High/Low} \longrightarrow \text{Low/High} \longrightarrow \text{Close}$$
-   - Drive candle wicks and closing price smoothly across the selected interval using an rAF tween.
+1. **Multi-Mode Sub-Tick Formation Engine in `ReplayController`**:
+   - For playback speeds $\le 2\text{x}$, provide a selectable Candle Formation / Performance mode:
+     - **Instant / Off**: Zero animation, immediate bar commits (optimal for high-speed scanning and low battery usage).
+     - **Cinematic (Smooth)**: 4-milestone cubic polynomial curve ($P_0 \to P_1 \to P_2 \to P_3$) with smooth rAF tweening.
+     - **Brownian Bridge (Realistic)**: Discrete pip quantization to instrument `minMove`, bounded stochastic Brownian noise with zero-boundary sine envelope, and Poisson tick arrival pacing ($20\text{ms}$–$90\text{ms}$).
+     - **Markov Microstructure**: Institutional order-flow state transitions (Accumulation $\to$ Impulse Breakout $\to$ Wick Exhaustion / Liquidity Absorption $\to$ Micro-Consolidation).
+   - Expose a compact mode selector dropdown in `ReplayBar` persisted in `localStorage`.
+   - Auto-downgrade to Instant mode at playback speeds $> 2\text{x}$ to prevent main-thread event starvation.
 2. **Camera Follow Lerp**:
    - When the replay index reaches the right visible boundary, animate the time scale logical range smoothly towards the new index over 150ms.
 
@@ -116,6 +122,7 @@ We will implement a **3-phase optimization strategy**:
 - **Rock-solid 60/120fps UI**: Eliminates noticeable stutter when opening/closing sidebars, watchlist, and order forms.
 - **Premium User Experience**: Matches the visual fidelity of modern trading platforms (TradingView, Exness).
 - **Reduced Battery & CPU Consumption**: Eliminating forced synchronous reflow loops lowers idle and replay CPU usage.
+- **Trader Versatility & Agency**: Accommodates tape readers/scalpers needing authentic market jitter alongside macro analysts preferring smooth visual playback and backtesters requiring instant zero-overhead execution.
 
 ### Negative & Mitigations
 

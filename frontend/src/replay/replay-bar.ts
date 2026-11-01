@@ -1,4 +1,5 @@
 import type { ReplayController, ReplayState } from './replay-controller';
+import type { FormationMode } from './sub-tick-generator';
 import { getIcon } from '../ui/icons';
 
 export const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100];
@@ -10,6 +11,8 @@ export class ReplayBar {
   private resetBtn!: HTMLButtonElement;
   private randomBtn!: HTMLButtonElement;
   private speedSelect!: HTMLSelectElement;
+  private modeSelect!: HTMLSelectElement;
+  private lastMode: FormationMode | null = null;
   private jumpInput!: HTMLInputElement;
   private jumpBtn!: HTMLButtonElement;
   private counterEl!: HTMLElement;
@@ -96,6 +99,31 @@ export class ReplayBar {
     });
     speedWrap.appendChild(this.speedSelect);
 
+    const modeWrap = document.createElement('div');
+    modeWrap.className = 'replay-mode-wrap';
+    modeWrap.title = 'Candle Formation Simulation Mode';
+    modeWrap.innerHTML = `<span class="replay-mode-icon">${getIcon('activity')}</span>`;
+
+    this.modeSelect = document.createElement('select');
+    this.modeSelect.className = 'replay-mode-select';
+    this.modeSelect.title = 'Candle Formation Simulation Mode';
+    const MODES: Array<{ value: FormationMode; label: string }> = [
+      { value: 'ltf', label: 'Real LTF' },
+      { value: 'orderflow', label: 'Order Flow' },
+      { value: 'instant', label: 'Instant' },
+    ];
+    for (const m of MODES) {
+      const opt = document.createElement('option');
+      opt.value = m.value;
+      opt.textContent = m.label;
+      if (m.value === this.controller.formationMode) opt.selected = true;
+      this.modeSelect.appendChild(opt);
+    }
+    this.modeSelect.addEventListener('change', () => {
+      this.controller.setFormationMode(this.modeSelect.value as FormationMode);
+    });
+    modeWrap.appendChild(this.modeSelect);
+
     this.jumpInput = document.createElement('input');
     this.jumpInput.type = 'datetime-local';
     this.jumpInput.className = 'replay-jump-input';
@@ -127,6 +155,7 @@ export class ReplayBar {
 
     rightGroup.append(
       speedWrap,
+      modeWrap,
       this.jumpInput,
       this.jumpBtn,
       this.counterEl,
@@ -177,6 +206,11 @@ export class ReplayBar {
     if (state.speed !== this.lastSpeed) {
       this.speedSelect.value = state.speed.toString();
       this.lastSpeed = state.speed;
+    }
+
+    if (this.controller.formationMode !== this.lastMode) {
+      this.modeSelect.value = this.controller.formationMode;
+      this.lastMode = this.controller.formationMode;
     }
   }
 }

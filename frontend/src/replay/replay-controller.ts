@@ -1,7 +1,35 @@
 import type { PythonBridge } from '../bridge/python-bridge';
 import type { CompactCandleRow } from '../chart/candle-series';
 import type { ChartManager } from '../chart/chart-manager';
-import { SubTickGenerator } from './sub-tick-generator';
+import { detectPricePrecision } from '../chart/chart-manager';
+import { getTimeframeSeconds } from '../drawings/drawing-engine';
+import { SubTickGenerator, type FormationMode } from './sub-tick-generator';
+
+export type { FormationMode };
+
+/**
+ * Maps Higher Timeframe (HTF) to recommended Lower Timeframe (LTF) for ground-truth replay.
+ * - 1M / 1W / 1D -> 1H
+ * - 4H / 6H / 12H -> 15m
+ * - 1H / 2H -> 1m
+ * - 2m - 45m -> 1m
+ * - 1m -> null (Base timeframe, cannot be expanded further)
+ */
+export function getRecommendedLTFTimeframe(htf: string): string | null {
+  const clean = (htf || '1H').trim();
+  const tfSec = getTimeframeSeconds(clean);
+
+  if (tfSec >= 86400) {
+    return '1H';
+  } else if (tfSec >= 14400) {
+    return '15m';
+  } else if (tfSec >= 1800) {
+    return '1m';
+  } else if (tfSec > 60) {
+    return '1m';
+  }
+  return null;
+}
 
 export interface ReplayState {
   symbol: string;
@@ -34,6 +62,8 @@ export class ReplayController {
   private browserCandles: CompactCandleRow[] = [];
   private browserTimer: ReturnType<typeof setInterval> | null = null;
   private readonly subTickGenerator: SubTickGenerator;
+  private ltfCandles: CompactCandleRow[] = [];
+  private ltfTimeframe: string | null = null;
 
   constructor(
     private readonly bridge: PythonBridge | null,
@@ -41,7 +71,30 @@ export class ReplayController {
     private readonly onStateChange: (state: ReplayState) => void,
     private readonly onPriceTick?: (price: number) => void,
   ) {
+    const savedMode = (typeof localStorage !== 'undefined'
+      ? localStorage.getItem('tv_replay_formation_mode')
+      : null) as string | null;
+    let initialMode: FormationMode = 'ltf';
+    if (savedMode === 'instant') {
+      initialMode = 'instant';
+    } else if (savedMode === 'orderflow' || savedMode === 'microstructure') {
+      initialMode = 'orderflow';
+    } else if (savedMode === 'ltf') {
+      initialMode = 'ltf';
+    } else {
+      initialMode = 'ltf';
+    }
+
+    try {
+      if (typeof localStorage !== 'undefined' && savedMode && savedMode !== initialMode) {
+        localStorage.setItem('tv_replay_formation_mode', initialMode);
+      }
+    } catch {
+      /* ignore */
+    }
+
     this.subTickGenerator = new SubTickGenerator({
+      mode: initialMode,
       onMicroTick: (candle, price) => {
         if (typeof (this.chart as any).updateCandle === 'function') {
           (this.chart as any).updateCandle(candle);
@@ -67,7 +120,110 @@ export class ReplayController {
 
   /** Feed a candle through the adaptive sub-tick generator */
   feedCandle(candle: CompactCandleRow, manualStep = false): void {
-    this.subTickGenerator.feed(candle, this.activeSpeed, manualStep);
+    const symbol = this.currentState?.symbol || '';
+    const minMove =
+      (typeof (this.chart as any)?.getMinMove === 'function'
+        ? (this.chart as any).getMinMove(candle[4])
+        : null) ?? detectPricePrecision(candle[4], symbol).minMove;
+    const tf = this.currentState?.timeframe || '1H';
+    const tfSec = getTimeframeSeconds(tf);
+    const ltfSlice = this.getLTFSliceForCandle(candle[0], tfSec);
+    this.subTickGenerator.feed(candle, this.activeSpeed, manualStep, minMove, ltfSlice);
+  }
+
+  /**
+   * Slices cached LTF candles falling within the duration of an HTF candle [candleStart_s, candleStart_s + tfSec).
+   */
+  getLTFSliceForCandle(candleStart_s: number, tfSec: number): CompactCandleRow[] {
+    if (!this.ltfCandles || this.ltfCandles.length === 0 || tfSec <= 0) {
+      return [];
+    }
+    const candleEnd_s = candleStart_s + tfSec;
+
+    let low = 0;
+    let high = this.ltfCandles.length - 1;
+    let startIndex = -1;
+
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (this.ltfCandles[mid][0] >= candleStart_s) {
+        startIndex = mid;
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+
+    if (startIndex === -1 || this.ltfCandles[startIndex][0] >= candleEnd_s) {
+      return [];
+    }
+
+    const slice: CompactCandleRow[] = [];
+    for (let i = startIndex; i < this.ltfCandles.length; i++) {
+      const bar = this.ltfCandles[i];
+      if (bar[0] >= candleEnd_s) break;
+      slice.push(bar);
+    }
+    return slice;
+  }
+
+  setLTFCandles(candles: CompactCandleRow[], timeframe?: string): void {
+    this.ltfCandles = candles.slice().sort((a, b) => a[0] - b[0]);
+    if (timeframe) {
+      this.ltfTimeframe = timeframe;
+    }
+  }
+
+  getLTFCandles(): CompactCandleRow[] {
+    return this.ltfCandles;
+  }
+
+  getLTFTimeframe(): string | null {
+    return this.ltfTimeframe;
+  }
+
+  async preloadLTFData(symbol: string, htf: string, start_s?: number, end_s?: number): Promise<void> {
+    if (!this.bridge) return;
+    const ltfTf = getRecommendedLTFTimeframe(htf);
+    if (!ltfTf) {
+      this.ltfCandles = [];
+      this.ltfTimeframe = null;
+      return;
+    }
+
+    try {
+      const payload: Record<string, unknown> = {
+        symbol,
+        timeframe: ltfTf,
+      };
+      if (start_s !== undefined) payload.start_s = start_s;
+      if (end_s !== undefined) payload.end_s = end_s;
+
+      const res = await this.bridge.callJson<ReplayResponse<{ rows: CompactCandleRow[] }>>(
+        'loadHistory',
+        payload,
+      );
+      if (res.ok && res.data?.rows) {
+        this.setLTFCandles(res.data.rows, ltfTf);
+      }
+    } catch (err) {
+      console.warn('[ReplayController] Failed to preload LTF candles for', symbol, ltfTf, err);
+    }
+  }
+
+  get formationMode(): FormationMode {
+    return this.subTickGenerator.getFormationMode();
+  }
+
+  setFormationMode(mode: FormationMode): void {
+    this.subTickGenerator.setFormationMode(mode);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('tv_replay_formation_mode', mode);
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   get state(): ReplayState | null {
@@ -131,6 +287,7 @@ export class ReplayController {
       this.activeSpeed = res.data.state.speed;
       this.chart.loadHistory(res.data.candles);
       this.onStateChange(this.currentState);
+      void this.preloadLTFData(symbol, timeframe);
     }
   }
 
@@ -177,6 +334,7 @@ export class ReplayController {
       this.activeSpeed = res.data.state.speed;
       this.chart.loadHistory(res.data.candles);
       this.onStateChange(this.currentState);
+      void this.preloadLTFData(symbol, timeframe);
     }
   }
 

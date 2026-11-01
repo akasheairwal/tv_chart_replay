@@ -88,6 +88,15 @@ export class ChartManager {
     }
   }
 
+  getCurrentSymbol(): string {
+    return this.currentSymbol;
+  }
+
+  getMinMove(samplePrice?: number): number {
+    const p = samplePrice && samplePrice > 0 ? samplePrice : 1.0;
+    return detectPricePrecision(p, this.currentSymbol).minMove;
+  }
+
   setSymbol(symbol: string): void {
     this.currentSymbol = symbol;
   }
