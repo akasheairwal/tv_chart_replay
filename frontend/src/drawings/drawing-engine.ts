@@ -35,11 +35,13 @@ import {
 import {
   getRequiredPointCount,
   getToolBehavior,
+  isDrawingVisibleOnTimeframe,
   type DrawingDefinition,
   type DrawingPoint,
   type DrawingStyle,
   type DrawingType,
   type DrawingInteractionState,
+  type DrawingVisibilityFilter,
   type MagnetMode,
 } from './drawing-types';
 import type { SlTpModificationRequest } from '../ui/sl-tp-confirm-dialog';
@@ -415,6 +417,22 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     return this.drawings;
   }
 
+  getDrawing(id: string): DrawingDefinition | null {
+    return this.drawings.find((d) => d.id === id) || null;
+  }
+
+  addDrawing(drawing: DrawingDefinition): void {
+    this.recordHistory();
+    this.drawings.push({
+      ...drawing,
+      visible: drawing.visible !== false,
+      locked: drawing.locked === true,
+      points: Array.isArray(drawing.points) ? drawing.points : [],
+    });
+    this.redraw();
+    if (this.onSave) this.onSave(drawing);
+  }
+
   getSelectedDrawing(): DrawingDefinition | null {
     if (!this.selectedDrawingId) return null;
     return this.drawings.find((d) => d.id === this.selectedDrawingId) || null;
@@ -645,11 +663,31 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       baseWidth = 2.5;
     }
 
+    const isClosedShape = [
+      'rectangle',
+      'rotated_rectangle',
+      'circle',
+      'ellipse',
+      'triangle',
+      'parallel_channel',
+      'equidistant_channel',
+      'fib_channel',
+      'fib_retracement',
+      'gann_box',
+      'date_and_price_range',
+      'price_range',
+      'date_range',
+    ].includes(targetTool);
+
     return {
       color: baseColor,
       width: baseWidth,
       lineStyle: 'solid',
-      fillColor: 'rgba(41, 98, 255, 0.15)',
+      strokeOpacity: 1.0,
+      fillBackground: isClosedShape,
+      fillColor: baseColor,
+      fillOpacity: 0.2,
+      backgroundOpacity: 0.2,
       ...custom,
     };
   }
@@ -666,6 +704,43 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     d.style = { ...d.style, ...styleUpdates };
     this.redraw();
     if (this.onSave) this.onSave(d);
+  }
+
+  updateDrawingVisibility(id: string, visibility: DrawingVisibilityFilter): void {
+    const d = this.drawings.find((item) => item.id === id);
+    if (!d) return;
+    d.visibility = { ...visibility };
+    this.redraw();
+    if (this.onSave) this.onSave(d);
+  }
+
+  commitDrawing(updated: DrawingDefinition): void {
+    const idx = this.drawings.findIndex((d) => d.id === updated.id);
+    if (idx < 0) return;
+    this.recordHistory();
+    this.drawings[idx] = JSON.parse(JSON.stringify(updated));
+    this.redraw();
+    if (this.onSave) this.onSave(this.drawings[idx]);
+    if (this.selectedDrawingId === updated.id && this.onSelectionChange) {
+      this.onSelectionChange(this.drawings[idx]);
+    }
+  }
+
+  previewDrawing(draft: DrawingDefinition): void {
+    const idx = this.drawings.findIndex((d) => d.id === draft.id);
+    if (idx < 0) return;
+    this.drawings[idx] = JSON.parse(JSON.stringify(draft));
+    this.redraw();
+  }
+
+  restoreDrawing(snapshot: DrawingDefinition): void {
+    const idx = this.drawings.findIndex((d) => d.id === snapshot.id);
+    if (idx < 0) return;
+    this.drawings[idx] = JSON.parse(JSON.stringify(snapshot));
+    this.redraw();
+    if (this.selectedDrawingId === snapshot.id && this.onSelectionChange) {
+      this.onSelectionChange(this.drawings[idx]);
+    }
   }
 
   toggleLock(id: string): void {
@@ -2230,7 +2305,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     if (this.isHiddenAllDrawings) return null;
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
-      if (d.visible && this.hitTestDrawing(d, px, py)) {
+      if (isDrawingVisibleOnTimeframe(d, this.currentTimeframe) && this.hitTestDrawing(d, px, py)) {
         return d;
       }
     }
@@ -2591,7 +2666,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     // 1. Render committed drawings
     if (!this.isHiddenAllDrawings) {
       for (const d of this.drawings) {
-        if (d.visible) {
+        if (isDrawingVisibleOnTimeframe(d, this.currentTimeframe)) {
           const isSelected =
             this.selectedDrawingIds.has(d.id) || d.id === this.selectedDrawingId;
           renderDrawingOnCanvas(d, isSelected, rc);

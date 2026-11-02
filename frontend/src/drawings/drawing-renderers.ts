@@ -56,12 +56,20 @@ export function colorWithOpacity(color: string, opacity: number): string {
   const clamped = Math.max(0, Math.min(1, opacity));
   const trimmed = color.trim();
 
-  if (trimmed.startsWith('rgba(')) {
-    return trimmed.replace(/[\d\.]+\s*\)$/, `${clamped})`);
+  if (trimmed === 'transparent') {
+    return 'transparent';
   }
-  if (trimmed.startsWith('rgb(')) {
-    return trimmed.replace('rgb(', 'rgba(').replace(')', `, ${clamped})`);
+
+  // rgb(r, g, b) or rgba(r, g, b, a)
+  const rgbMatch = trimmed.match(/^rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgbMatch) {
+    const r = Math.min(255, Math.max(0, parseInt(rgbMatch[1], 10)));
+    const g = Math.min(255, Math.max(0, parseInt(rgbMatch[2], 10)));
+    const b = Math.min(255, Math.max(0, parseInt(rgbMatch[3], 10)));
+    return `rgba(${r}, ${g}, ${b}, ${clamped})`;
   }
+
+  // Hex format
   if (trimmed.startsWith('#')) {
     let hex = trimmed.slice(1);
     if (hex.length === 3 || hex.length === 4) {
@@ -76,11 +84,25 @@ export function colorWithOpacity(color: string, opacity: number): string {
   }
 
   const namedMap: Record<string, string> = {
+    white: `rgba(255, 255, 255, ${clamped})`,
+    black: `rgba(0, 0, 0, ${clamped})`,
     green: `rgba(8, 153, 129, ${clamped})`,
     red: `rgba(242, 54, 69, ${clamped})`,
     blue: `rgba(41, 98, 255, ${clamped})`,
+    orange: `rgba(255, 152, 0, ${clamped})`,
+    purple: `rgba(171, 71, 188, ${clamped})`,
+    gray: `rgba(120, 123, 134, ${clamped})`,
+    grey: `rgba(120, 123, 134, ${clamped})`,
   };
   return namedMap[trimmed.toLowerCase()] || trimmed;
+}
+
+export function shouldFillBackground(d: DrawingDefinition): boolean {
+  if (d.style.fillBackground === false) return false;
+  if (d.style.fillColor === 'transparent') return false;
+  const op = d.style.fillOpacity ?? d.style.backgroundOpacity;
+  if (op !== undefined && op <= 0) return false;
+  return true;
 }
 
 export function renderDrawingOnCanvas(
@@ -115,9 +137,11 @@ export function renderDrawingOnCanvas(
   const [p1, p2, p3] = pts;
 
   ctx.save();
-  ctx.strokeStyle = d.style.color || '#2962ff';
+  ctx.strokeStyle = colorWithOpacity(d.style.color || '#2962ff', d.style.strokeOpacity ?? 1.0);
   ctx.lineWidth = d.style.width || 2;
-  ctx.fillStyle = d.style.fillColor || 'rgba(41, 98, 255, 0.15)';
+  const fillOp = d.style.fillOpacity ?? d.style.backgroundOpacity ?? 0.2;
+  const baseFillColor = d.style.fillColor || d.style.color || '#2962ff';
+  ctx.fillStyle = colorWithOpacity(baseFillColor, fillOp);
 
   if (d.style.lineStyle === 'dashed') {
     ctx.setLineDash([6, 4]);
@@ -383,8 +407,20 @@ export function renderDrawingOnCanvas(
         const minY = Math.min(p1.y, p2.y);
         const rw = Math.abs(p2.x - p1.x);
         const rh = Math.abs(p2.y - p1.y);
-        ctx.fillRect(minX, minY, rw, rh);
+        if (shouldFillBackground(d)) {
+          ctx.fillRect(minX, minY, rw, rh);
+        }
         ctx.strokeRect(minX, minY, rw, rh);
+
+        if (d.style.textOptions?.content || d.style.text) {
+          const txt = d.style.textOptions?.content || d.style.text!;
+          const fSize = d.style.textOptions?.fontSize || d.style.fontSize || 12;
+          const isBold = d.style.textOptions?.fontBold;
+          const isItalic = d.style.textOptions?.fontItalic;
+          ctx.font = `${isBold ? 'bold ' : ''}${isItalic ? 'italic ' : ''}${fSize}px sans-serif`;
+          ctx.fillStyle = colorWithOpacity(d.style.textOptions?.textColor || d.style.color || '#ffffff', 1.0);
+          ctx.fillText(txt, minX + 8, minY + fSize + 4);
+        }
       }
       break;
     }
@@ -412,7 +448,9 @@ export function renderDrawingOnCanvas(
             ctx.lineTo(p3Calc.x, p3Calc.y);
             ctx.lineTo(p4Calc.x, p4Calc.y);
             ctx.closePath();
-            ctx.fill();
+            if (shouldFillBackground(d)) {
+              ctx.fill();
+            }
             ctx.stroke();
           }
         } else {
@@ -432,7 +470,9 @@ export function renderDrawingOnCanvas(
         const ry = Math.abs(p2.y - p1.y) / 2;
         ctx.beginPath();
         ctx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
-        ctx.fill();
+        if (shouldFillBackground(d)) {
+          ctx.fill();
+        }
         ctx.stroke();
       }
       break;
@@ -444,7 +484,9 @@ export function renderDrawingOnCanvas(
         const r = Math.sqrt(dx * dx + dy * dy);
         ctx.beginPath();
         ctx.arc(p1.x, p1.y, r, 0, Math.PI * 2);
-        ctx.fill();
+        if (shouldFillBackground(d)) {
+          ctx.fill();
+        }
         ctx.stroke();
       }
       break;
@@ -456,7 +498,9 @@ export function renderDrawingOnCanvas(
         ctx.lineTo(p2.x, p2.y);
         ctx.lineTo(p3.x, p3.y);
         ctx.closePath();
-        ctx.fill();
+        if (shouldFillBackground(d)) {
+          ctx.fill();
+        }
         ctx.stroke();
       }
       break;
@@ -469,7 +513,7 @@ export function renderDrawingOnCanvas(
         for (let i = 1; i < pts.length; i++) {
           ctx.lineTo(pts[i].x, pts[i].y);
         }
-        if (d.style.fillColor && d.style.fillColor !== 'transparent') {
+        if (d.style.fillBackground === true && shouldFillBackground(d)) {
           ctx.closePath();
           ctx.fill();
         }
@@ -487,24 +531,52 @@ export function renderDrawingOnCanvas(
         const p1Price = d.points[0].price;
         const p2Price = d.points[1].price;
 
+        const renderedLevels: Array<{ y: number; color: string; width: number; ratio: number; price: number }> = [];
+
         for (let i = 0; i < levels.length; i++) {
-          const ratio = levels[i];
+          const item = levels[i];
+          const isObj = typeof item === 'object' && item !== null;
+          if (isObj && !item.enabled) continue;
+          const ratio = isObj ? item.coeff : item;
+          const levelColor = (isObj && item.color) ? item.color : (d.style.color || '#ff9800');
+          const levelWidth = (isObj && item.width) ? item.width : (d.style.width || 1);
+
           const levelPrice = p1Price + (p2Price - p1Price) * ratio;
           const levelPixel = chartToPixel({ timestamp: d.points[0].timestamp, price: levelPrice });
           if (!levelPixel) continue;
 
+          renderedLevels.push({ y: levelPixel.y, color: levelColor, width: levelWidth, ratio, price: levelPrice });
+        }
+
+        // Draw background bands between adjacent levels if background fill is enabled
+        if (shouldFillBackground(d) && renderedLevels.length >= 2) {
+          const sortedLevels = [...renderedLevels].sort((a, b) => a.y - b.y);
+          const bgOpacity = d.style.backgroundOpacity ?? d.style.fillOpacity ?? 0.12;
+          for (let i = 0; i < sortedLevels.length - 1; i++) {
+            const topLevel = sortedLevels[i];
+            const bottomLevel = sortedLevels[i + 1];
+            ctx.fillStyle = colorWithOpacity(topLevel.color, bgOpacity);
+            ctx.fillRect(minX, topLevel.y, maxX - minX, bottomLevel.y - topLevel.y);
+          }
+        }
+
+        for (const lvl of renderedLevels) {
+          ctx.save();
+          ctx.strokeStyle = lvl.color;
+          ctx.lineWidth = lvl.width;
           ctx.beginPath();
-          ctx.moveTo(minX, levelPixel.y);
-          ctx.lineTo(maxX, levelPixel.y);
+          ctx.moveTo(minX, lvl.y);
+          ctx.lineTo(maxX, lvl.y);
           ctx.stroke();
 
           ctx.font = '10px sans-serif';
-          ctx.fillStyle = d.style.color || '#ff9800';
+          ctx.fillStyle = lvl.color;
           ctx.fillText(
-            `${(ratio * 100).toFixed(1)}% (${levelPrice.toFixed(4)})`,
+            `${(lvl.ratio * 100).toFixed(1)}% (${lvl.price.toFixed(4)})`,
             minX + 6,
-            levelPixel.y - 3,
+            lvl.y - 3,
           );
+          ctx.restore();
         }
       }
       break;
@@ -526,23 +598,33 @@ export function renderDrawingOnCanvas(
         const rightX = Math.max(p1.x, p2.x, p3.x) + 160;
         const leftX = p3.x;
 
-        for (const ratio of levels) {
+        for (const item of levels) {
+          const isObj = typeof item === 'object' && item !== null;
+          if (isObj && !item.enabled) continue;
+          const ratio = isObj ? item.coeff : item;
+          const levelColor = (isObj && item.color) ? item.color : (d.style.color || '#ff9800');
+          const levelWidth = (isObj && item.width) ? item.width : (d.style.width || 1);
+
           const extPrice = p3Price + (p2Price - p1Price) * ratio;
           const extPixel = chartToPixel({ timestamp: d.points[2].timestamp, price: extPrice });
           if (!extPixel) continue;
 
+          ctx.save();
+          ctx.strokeStyle = levelColor;
+          ctx.lineWidth = levelWidth;
           ctx.beginPath();
           ctx.moveTo(leftX, extPixel.y);
           ctx.lineTo(rightX, extPixel.y);
           ctx.stroke();
 
           ctx.font = '10px sans-serif';
-          ctx.fillStyle = d.style.color || '#ff9800';
+          ctx.fillStyle = levelColor;
           ctx.fillText(
             `Ext ${(ratio * 100).toFixed(1)}% (${extPrice.toFixed(4)})`,
             leftX + 6,
             extPixel.y - 3,
           );
+          ctx.restore();
         }
       }
       break;
@@ -577,13 +659,15 @@ export function renderDrawingOnCanvas(
       if (p2 && p3) {
         const geo = calculateParallelChannel(p1, p2, p3);
 
-        ctx.beginPath();
-        ctx.moveTo(geo.p1.x, geo.p1.y);
-        ctx.lineTo(geo.p2.x, geo.p2.y);
-        ctx.lineTo(geo.p4.x, geo.p4.y);
-        ctx.lineTo(geo.p3.x, geo.p3.y);
-        ctx.closePath();
-        ctx.fill();
+        if (shouldFillBackground(d)) {
+          ctx.beginPath();
+          ctx.moveTo(geo.p1.x, geo.p1.y);
+          ctx.lineTo(geo.p2.x, geo.p2.y);
+          ctx.lineTo(geo.p4.x, geo.p4.y);
+          ctx.lineTo(geo.p3.x, geo.p3.y);
+          ctx.closePath();
+          ctx.fill();
+        }
 
         ctx.beginPath();
         ctx.moveTo(geo.p1.x, geo.p1.y);
@@ -728,6 +812,9 @@ export function renderDrawingOnCanvas(
         const boxW = maxX - minX;
         const boxH = maxY - minY;
 
+        if (shouldFillBackground(d)) {
+          ctx.fillRect(minX, minY, boxW, boxH);
+        }
         ctx.strokeRect(minX, minY, boxW, boxH);
 
         for (const l of GANN_BOX_LEVELS) {
@@ -751,9 +838,30 @@ export function renderDrawingOnCanvas(
 
     // -- 3. Annotations & Labels -------------------------------------
     case 'text': {
-      const text = d.style.text || 'Text';
-      ctx.fillStyle = d.style.color || '#ffffff';
-      ctx.font = `${d.style.fontSize || 13}px sans-serif`;
+      const text = d.style.textOptions?.content ?? d.style.text ?? 'Text';
+      const fontSize = d.style.textOptions?.fontSize ?? d.style.fontSize ?? 13;
+      const isBold = d.style.textOptions?.fontBold;
+      const isItalic = d.style.textOptions?.fontItalic;
+      const fontStyle = `${isBold ? 'bold ' : ''}${isItalic ? 'italic ' : ''}${fontSize}px sans-serif`;
+      ctx.font = fontStyle;
+
+      if (d.style.textOptions?.showBackground) {
+        const textMetrics = ctx.measureText(text);
+        const textWidth = textMetrics.width;
+        const textHeight = fontSize * 1.3;
+        const bgCol = d.style.textOptions.backgroundColor || '#1e222d';
+        const bgOp = d.style.textOptions.backgroundOpacity ?? 0.85;
+        ctx.fillStyle = colorWithOpacity(bgCol, bgOp);
+        safeRoundRect(p1.x - 4, p1.y - textHeight + 3, textWidth + 8, textHeight + 4, 3);
+        ctx.fill();
+        if (d.style.textOptions.showBorder) {
+          ctx.strokeStyle = colorWithOpacity(d.style.textOptions.borderColor || '#2962ff', 1.0);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+
+      ctx.fillStyle = colorWithOpacity(d.style.textOptions?.textColor || d.style.color || '#ffffff', 1.0);
       ctx.fillText(text, p1.x, p1.y);
       break;
     }
@@ -765,18 +873,27 @@ export function renderDrawingOnCanvas(
         ctx.lineTo(p2.x, p2.y);
         ctx.stroke();
 
-        const boxW = 120;
-        const boxH = 34;
+        const text = d.style.textOptions?.content ?? d.style.text ?? 'Callout Note';
+        const fontSize = d.style.textOptions?.fontSize ?? d.style.fontSize ?? 12;
+        const isBold = d.style.textOptions?.fontBold;
+        const isItalic = d.style.textOptions?.fontItalic;
+        ctx.font = `${isBold ? 'bold ' : ''}${isItalic ? 'italic ' : ''}${fontSize}px sans-serif`;
+        const textMetrics = ctx.measureText(text);
+        const boxW = Math.max(120, textMetrics.width + 16);
+        const boxH = Math.max(34, fontSize * 2);
         const bx = p2.x - boxW / 2;
         const by = p2.y - boxH / 2;
 
-        ctx.fillStyle = 'rgba(26, 26, 33, 0.9)';
-        ctx.fillRect(bx, by, boxW, boxH);
+        const fillOp = d.style.fillOpacity ?? d.style.backgroundOpacity ?? 0.9;
+        const bgCol = d.style.fillColor || 'rgba(26, 26, 33, 0.9)';
+        ctx.fillStyle = colorWithOpacity(bgCol, fillOp);
+        if (shouldFillBackground(d)) {
+          ctx.fillRect(bx, by, boxW, boxH);
+        }
         ctx.strokeRect(bx, by, boxW, boxH);
 
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '12px sans-serif';
-        ctx.fillText(d.style.text || 'Callout Note', bx + 8, by + 21);
+        ctx.fillStyle = colorWithOpacity(d.style.textOptions?.textColor || '#ffffff', 1.0);
+        ctx.fillText(text, bx + 8, by + fontSize + 6);
       }
       break;
     }
@@ -818,9 +935,13 @@ export function renderDrawingOnCanvas(
         const minY = Math.min(p1.y, p2.y);
         const maxY = Math.max(p1.y, p2.y);
 
-        ctx.fillStyle = isPositive ? 'rgba(38, 166, 154, 0.15)' : 'rgba(239, 83, 80, 0.15)';
-        ctx.strokeStyle = isPositive ? '#26a69a' : '#ef5350';
-        ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        const op = d.style.fillOpacity ?? d.style.backgroundOpacity ?? 0.15;
+        const baseColor = d.style.fillColor || (isPositive ? '#26a69a' : '#ef5350');
+        ctx.fillStyle = colorWithOpacity(baseColor, op);
+        ctx.strokeStyle = colorWithOpacity(d.style.color || (isPositive ? '#26a69a' : '#ef5350'), d.style.strokeOpacity ?? 1.0);
+        if (shouldFillBackground(d)) {
+          ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        }
         ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
         const { barCount, durText, volText } = resolveBarStats(
@@ -951,10 +1072,14 @@ export function renderDrawingOnCanvas(
         const maxY = Math.max(p1.y, p2.y);
 
         // Translucent Shaded Box
-        ctx.fillStyle = isPositive ? 'rgba(8, 153, 129, 0.18)' : 'rgba(242, 54, 69, 0.18)';
-        ctx.strokeStyle = isPositive ? '#089981' : '#f23645';
-        ctx.lineWidth = 1.5;
-        ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        const op = d.style.fillOpacity ?? d.style.backgroundOpacity ?? 0.18;
+        const baseColor = d.style.fillColor || (isPositive ? '#089981' : '#f23645');
+        ctx.fillStyle = colorWithOpacity(baseColor, op);
+        ctx.strokeStyle = colorWithOpacity(d.style.color || (isPositive ? '#089981' : '#f23645'), d.style.strokeOpacity ?? 1.0);
+        ctx.lineWidth = d.style.width || 1.5;
+        if (shouldFillBackground(d)) {
+          ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        }
         ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
         // Directional ticks on corners
@@ -1410,8 +1535,9 @@ export function renderDrawingOnCanvas(
           ctx.fill();
         } else {
           drawMidpointQuadraticSpline(ctx, sPts);
-          if (d.style.fillColor && d.style.fillColor !== 'transparent') {
-            ctx.fillStyle = d.style.fillColor;
+          if (shouldFillBackground(d) && d.style.fillColor && d.style.fillColor !== 'transparent') {
+            const op = d.style.fillOpacity ?? d.style.backgroundOpacity ?? 0.2;
+            ctx.fillStyle = colorWithOpacity(d.style.fillColor, op);
             ctx.fill();
           }
           ctx.stroke();
@@ -1462,8 +1588,9 @@ export function renderDrawingOnCanvas(
           ctx.fill();
         } else {
           drawCatmullRomSpline(ctx, sPts, 0.5);
-          if (d.style.fillColor && d.style.fillColor !== 'transparent') {
-            ctx.fillStyle = d.style.fillColor;
+          if (shouldFillBackground(d) && d.style.fillColor && d.style.fillColor !== 'transparent') {
+            const op = d.style.fillOpacity ?? d.style.backgroundOpacity ?? 0.2;
+            ctx.fillStyle = colorWithOpacity(d.style.fillColor, op);
             ctx.fill();
           }
           ctx.stroke();

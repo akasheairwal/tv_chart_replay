@@ -96,14 +96,82 @@ export interface DrawingPoint {
   price: number;
 }
 
+// ---------------------------------------------------------------------------
+// ADR 0006: Multi-Timeframe Visibility Schema
+// ---------------------------------------------------------------------------
+
+export interface TimeframeVisibilityRange {
+  enabled: boolean;
+  minMinutes?: number; // e.g. 1 (1m)
+  maxMinutes?: number; // e.g. 1440 (1D)
+}
+
+export interface DrawingVisibilityFilter {
+  ticks: boolean;
+  seconds: TimeframeVisibilityRange;
+  minutes: TimeframeVisibilityRange;
+  hours: TimeframeVisibilityRange;
+  days: boolean;
+  weeks: boolean;
+  months: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0006: Fibonacci & Pitchfork Ratio Level Definition
+// ---------------------------------------------------------------------------
+
+export interface LevelRatioItem {
+  index: number;
+  enabled: boolean;
+  coeff: number; // e.g. 0.618
+  color: string; // Hex color
+  width?: number; // Level line thickness
+  lineStyle?: 'solid' | 'dashed' | 'dotted';
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0006: Text Formatting & Alignment Specification
+// ---------------------------------------------------------------------------
+
+export interface DrawingTextOptions {
+  content: string;
+  fontSize: number; // 10, 12, 14, 16, 20, 24, 28, 32, 40
+  fontBold: boolean;
+  fontItalic: boolean;
+  textColor: string;
+  hAlign: 'left' | 'center' | 'right';
+  vAlign: 'top' | 'middle' | 'bottom';
+  wordWrap: boolean;
+  showBackground: boolean;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  showBorder: boolean;
+  borderColor: string;
+  borderWidth: number;
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0006: Saved Drawing Template Preset
+// ---------------------------------------------------------------------------
+
+export interface DrawingTemplate {
+  id: string;
+  name: string;
+  toolType: DrawingType;
+  style: Partial<DrawingStyle>;
+  createdAt: number;
+}
+
 export interface DrawingStyle {
+  // Core styling
   color: string;
   width: number;
   lineStyle?: 'solid' | 'dashed' | 'dotted';
+  strokeOpacity?: number;
   fillColor?: string;
   fontSize?: number;
   text?: string;
-  levels?: number[];
+  levels?: Array<number | LevelRatioItem>;
   showLabels?: boolean;
   showPrices?: boolean;
   showPercentages?: boolean;
@@ -111,6 +179,8 @@ export interface DrawingStyle {
   extendRight?: boolean;
   reverse?: boolean;
   fillOpacity?: number;
+
+  // ADR 0005: Position sizing & risk parameters
   riskReward?: number;
   lotSize?: number;
   accountSize?: number;
@@ -134,6 +204,50 @@ export interface DrawingStyle {
   qty?: number;
   exitTimestamp?: number;
   exitPrice?: number;
+
+  // ADR 0006: Directional line endpoints & indicators
+  leftEnd?: 'normal' | 'arrow' | 'circle';
+  rightEnd?: 'normal' | 'arrow' | 'circle';
+  showMiddlePoint?: boolean;
+  showPriceLabels?: boolean;
+
+  // ADR 0006: Fibonacci & Gann Appearance Matrix
+  useOneColor?: boolean;
+  fillBackground?: boolean;
+  backgroundOpacity?: number;
+  showLevels?: boolean;
+  levelsMode?: 'values' | 'percents';
+  labelsPositionH?: 'left' | 'center' | 'right';
+  labelsPositionV?: 'top' | 'middle' | 'bottom';
+
+  // ADR 0006: Text & Container Options
+  textOptions?: DrawingTextOptions;
+
+  // ADR 0006: Measurement & Range Metrics
+  showBarsRange?: boolean;
+  showDateRange?: boolean;
+  showDistancePips?: boolean;
+  showAngle?: boolean;
+
+  // ADR 0006: Profile & Analytical Parameters
+  source?: 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4';
+  bandDeviations?: number[];
+  valueAreaVolumePercent?: number;
+
+  // ADR 0006: Pattern & Elliott Waves
+  waveDegree?:
+    | 'Subminuette'
+    | 'Minuette'
+    | 'Minute'
+    | 'Minor'
+    | 'Intermediate'
+    | 'Primary'
+    | 'Cycle'
+    | 'Supercycle'
+    | 'Grand Supercycle';
+  showRatios?: boolean;
+  showWaveLabels?: boolean;
+  degree?: string;
 }
 
 export interface DrawingDefinition {
@@ -143,6 +257,7 @@ export interface DrawingDefinition {
   type: DrawingType;
   points: DrawingPoint[];
   style: DrawingStyle;
+  visibility?: DrawingVisibilityFilter;
   locked: boolean;
   visible: boolean;
 }
@@ -1572,3 +1687,178 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     ],
   },
 ];
+
+// ---------------------------------------------------------------------------
+// ADR 0006: Helper Functions and Defaults for Unified Settings & Visibility
+// ---------------------------------------------------------------------------
+
+export function createDefaultVisibilityFilter(): DrawingVisibilityFilter {
+  return {
+    ticks: true,
+    seconds: { enabled: true, minMinutes: 0.0166, maxMinutes: 0.99 },
+    minutes: { enabled: true, minMinutes: 1, maxMinutes: 59 },
+    hours: { enabled: true, minMinutes: 60, maxMinutes: 1439 },
+    days: true,
+    weeks: true,
+    months: true,
+  };
+}
+
+export function parseTimeframeCategory(tf: string): {
+  category: 'ticks' | 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks' | 'months';
+  totalMinutes: number;
+} {
+  const clean = (tf || '1H').trim();
+  const upper = clean.toUpperCase();
+
+  if (upper === 'TICK' || upper === 'TICKS' || upper.endsWith('T')) {
+    return { category: 'ticks', totalMinutes: 0 };
+  }
+
+  if (clean.endsWith('s') || clean.endsWith('S')) {
+    const s = parseInt(clean, 10);
+    return { category: 'seconds', totalMinutes: isNaN(s) ? 0.5 : s / 60 };
+  }
+
+  // Monthly checks: Uppercase 'M' (e.g. '1M', 'M', 'MONTHLY', '1MONTH')
+  if (
+    clean === 'M' ||
+    clean === '1M' ||
+    clean === '3M' ||
+    clean === '6M' ||
+    clean === '12M' ||
+    upper === 'MONTHLY' ||
+    upper === '1MONTH' ||
+    upper.endsWith('MO')
+  ) {
+    return { category: 'months', totalMinutes: 43200 };
+  }
+
+  if (upper === '1D' || upper === 'D' || upper === 'DAILY') {
+    return { category: 'days', totalMinutes: 1440 };
+  }
+  if (upper === '1W' || upper === 'W' || upper === 'WEEKLY') {
+    return { category: 'weeks', totalMinutes: 10080 };
+  }
+
+  if (clean.endsWith('h') || clean.endsWith('H')) {
+    const h = parseInt(clean, 10);
+    const hrs = isNaN(h) ? 1 : h;
+    return { category: 'hours', totalMinutes: hrs * 60 };
+  }
+
+  if (clean.endsWith('m')) {
+    const m = parseInt(clean, 10);
+    const mins = isNaN(m) ? 1 : m;
+    if (mins >= 60) {
+      return { category: 'hours', totalMinutes: mins };
+    }
+    return { category: 'minutes', totalMinutes: mins };
+  }
+
+  // Bare numbers (e.g. "5", "60", "240")
+  const num = parseInt(clean, 10);
+  if (!isNaN(num)) {
+    if (num >= 1440) return { category: 'days', totalMinutes: num };
+    if (num >= 60) return { category: 'hours', totalMinutes: num };
+    return { category: 'minutes', totalMinutes: num };
+  }
+
+  return { category: 'hours', totalMinutes: 60 };
+}
+
+export function evaluateDrawingVisibility(
+  filter: DrawingVisibilityFilter | undefined,
+  timeframe: string
+): boolean {
+  if (!filter) return true;
+  const parsed = parseTimeframeCategory(timeframe);
+
+  switch (parsed.category) {
+    case 'ticks':
+      return filter.ticks;
+    case 'seconds': {
+      if (!filter.seconds.enabled) return false;
+      const min = filter.seconds.minMinutes ?? 0;
+      const max = filter.seconds.maxMinutes ?? 0.9999;
+      return parsed.totalMinutes >= min && parsed.totalMinutes <= max;
+    }
+    case 'minutes': {
+      if (!filter.minutes.enabled) return false;
+      const min = filter.minutes.minMinutes ?? 1;
+      const max = filter.minutes.maxMinutes ?? 59;
+      return parsed.totalMinutes >= min && parsed.totalMinutes <= max;
+    }
+    case 'hours': {
+      if (!filter.hours.enabled) return false;
+      const min = filter.hours.minMinutes ?? 60;
+      const max = filter.hours.maxMinutes ?? 1439;
+      return parsed.totalMinutes >= min && parsed.totalMinutes <= max;
+    }
+    case 'days':
+      return filter.days;
+    case 'weeks':
+      return filter.weeks;
+    case 'months':
+      return filter.months;
+    default:
+      return true;
+  }
+}
+
+export function isDrawingVisibleOnTimeframe(
+  drawing: DrawingDefinition,
+  timeframe: string
+): boolean {
+  if (drawing.visible === false) return false;
+  return evaluateDrawingVisibility(drawing.visibility, timeframe);
+}
+
+export const STANDARD_FIB_COEFFICIENTS = [
+  -0.618, -0.382, -0.236, 0.0, 0.236, 0.382, 0.5, 0.618, 0.65, 0.786,
+  1.0, 1.272, 1.414, 1.618, 1.786, 2.0, 2.272, 2.414, 2.618, 3.618, 4.236
+];
+
+export function createDefaultFibLevels(): LevelRatioItem[] {
+  const activeSet = new Set([0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]);
+  const defaultColors: Record<number, string> = {
+    0.0: '#787b86',
+    0.236: '#f23645',
+    0.382: '#ff9800',
+    0.5: '#2962ff',
+    0.618: '#089981',
+    0.65: '#089981',
+    0.786: '#787b86',
+    1.0: '#787b86',
+    1.618: '#2962ff',
+    2.618: '#ab47bc',
+  };
+
+  return STANDARD_FIB_COEFFICIENTS.map((coeff, index) => ({
+    index,
+    coeff,
+    enabled: activeSet.has(coeff),
+    color: defaultColors[coeff] || '#787b86',
+    width: 1,
+    lineStyle: 'solid',
+  }));
+}
+
+export function createDefaultTextOptions(initialContent: string = ''): DrawingTextOptions {
+  return {
+    content: initialContent,
+    fontSize: 14,
+    fontBold: false,
+    fontItalic: false,
+    textColor: '#ffffff',
+    hAlign: 'center',
+    vAlign: 'middle',
+    wordWrap: true,
+    showBackground: false,
+    backgroundColor: '#1e222d',
+    backgroundOpacity: 0.85,
+    showBorder: false,
+    borderColor: '#363a45',
+    borderWidth: 1,
+  };
+}

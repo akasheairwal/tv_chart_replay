@@ -1,7 +1,9 @@
 import type { DrawingEngine } from '../drawings/drawing-engine';
 import type { DrawingDefinition, DrawingStyle, DrawingType } from '../drawings/drawing-types';
-import { calculatePositionMetrics, calculateFinancialPosition } from '../drawings/drawing-math';
+import { calculatePositionMetrics } from '../drawings/drawing-math';
 import { getIcon } from './icons';
+import { DrawingSettingsModal } from './drawing-settings-modal';
+import { sanitizeHexColor } from './drawing-settings-widgets';
 
 const COLOR_PRESETS = [
   '#2962ff', // Blue
@@ -16,6 +18,7 @@ export class DrawingStyleEditor {
   private el: HTMLElement;
   private currentDrawing: DrawingDefinition | null = null;
   private activeTool: DrawingType | null = null;
+  public settingsModal: DrawingSettingsModal;
   public onCreateOrder?: (params: {
     side: 'BUY' | 'SELL';
     entryPrice: number;
@@ -31,7 +34,47 @@ export class DrawingStyleEditor {
     this.el = document.createElement('div');
     this.el.className = 'drawing-style-editor tv-floating-style';
     this.el.style.display = 'none';
+    this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.addEventListener('mousedown', (e) => e.stopPropagation());
     this.container.appendChild(this.el);
+
+    this.settingsModal = new DrawingSettingsModal(this.engine);
+    this.settingsModal.onSave = (saved) => {
+      this.handleModalSave(saved);
+    };
+    this.settingsModal.onPreview = (draft) => {
+      this.handleModalPreview(draft);
+    };
+    this.settingsModal.onCancel = (snapshot) => {
+      this.handleModalCancel(snapshot);
+    };
+  }
+
+  private handleModalSave(saved: DrawingDefinition): void {
+    if (this.currentDrawing && (this.currentDrawing.id === saved.id || this.currentDrawing.type === saved.type)) {
+      this.currentDrawing = this.engine.getSelectedDrawing() || saved;
+      this.render();
+    } else if (this.activeTool && (saved.id === `preset_${this.activeTool}` || saved.type === this.activeTool)) {
+      this.render();
+    }
+  }
+
+  private handleModalPreview(draft: DrawingDefinition): void {
+    if (this.currentDrawing && this.currentDrawing.id === draft.id) {
+      this.currentDrawing = draft;
+      this.render();
+    } else if (this.activeTool && draft.type === this.activeTool) {
+      this.render();
+    }
+  }
+
+  private handleModalCancel(snapshot: DrawingDefinition): void {
+    if (this.currentDrawing && this.currentDrawing.id === snapshot.id) {
+      this.currentDrawing = this.engine.getSelectedDrawing() || snapshot;
+      this.render();
+    } else if (this.activeTool && snapshot.type === this.activeTool) {
+      this.render();
+    }
   }
 
   show(drawing: DrawingDefinition): void {
@@ -61,7 +104,8 @@ export class DrawingStyleEditor {
   openSettingsDialog(drawing: DrawingDefinition): void {
     this.currentDrawing = drawing;
     this.activeTool = null;
-    this.renderSettingsModal(drawing);
+    this.settingsModal.onCreateOrder = this.onCreateOrder;
+    this.settingsModal.open(drawing);
   }
 
   private updateStyle(styleUpdates: Partial<DrawingStyle>): void {
@@ -98,12 +142,15 @@ export class DrawingStyleEditor {
     const colorGroup = document.createElement('div');
     colorGroup.className = 'style-btn-group';
 
+    const currentHex = sanitizeHexColor(style.color).toLowerCase();
+
     for (const color of COLOR_PRESETS) {
       const swatch = document.createElement('button');
-      swatch.className = `style-color-swatch ${style.color === color ? 'active' : ''}`;
+      swatch.className = `style-color-swatch ${currentHex === color.toLowerCase() ? 'active' : ''}`;
       swatch.style.backgroundColor = color;
       swatch.title = `Color: ${color}`;
-      swatch.addEventListener('click', () => {
+      swatch.addEventListener('click', (e) => {
+        e.stopPropagation();
         this.updateStyle({ color });
       });
       colorGroup.appendChild(swatch);
@@ -113,7 +160,7 @@ export class DrawingStyleEditor {
     const colorPicker = document.createElement('input');
     colorPicker.type = 'color';
     colorPicker.className = 'style-color-input';
-    colorPicker.value = style.color || '#2962ff';
+    colorPicker.value = currentHex;
     colorPicker.title = 'Custom Color';
     colorPicker.addEventListener('input', () => {
       this.updateStyle({ color: colorPicker.value });
@@ -128,10 +175,11 @@ export class DrawingStyleEditor {
     widthGroup.className = 'style-btn-group';
     for (const w of [1, 2, 3, 4]) {
       const btn = document.createElement('button');
-      btn.className = `style-prop-btn ${style.width === w ? 'active' : ''}`;
+      btn.className = `style-prop-btn ${(style.width ?? 1) === w ? 'active' : ''}`;
       btn.textContent = `${w}px`;
       btn.title = `Line Width: ${w}px`;
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         this.updateStyle({ width: w });
       });
       widthGroup.appendChild(btn);
@@ -153,7 +201,8 @@ export class DrawingStyleEditor {
       btn.className = `style-prop-btn ${(style.lineStyle || 'solid') === s.id ? 'active' : ''}`;
       btn.textContent = s.label;
       btn.title = `Line Style: ${s.id}`;
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         this.updateStyle({ lineStyle: s.id });
       });
       styleGroup.appendChild(btn);
@@ -172,31 +221,50 @@ export class DrawingStyleEditor {
         orderBtn.className = 'style-action-btn trade-btn';
         orderBtn.innerHTML = `⚡ Order`;
         orderBtn.title = 'Create Order in Trade Panel using tool SL/TP/Lots';
-        orderBtn.addEventListener('click', () => {
+        orderBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           this.executeTradeFromDrawing(d);
         });
         this.el.appendChild(orderBtn);
-
-        // Settings Modal Button
-        const settingsBtn = document.createElement('button');
-        settingsBtn.className = 'style-action-btn settings-btn';
-        settingsBtn.innerHTML = `⚙️`;
-        settingsBtn.title = 'Position Settings & Risk Inputs';
-        settingsBtn.addEventListener('click', () => {
-          this.renderSettingsModal(d);
-        });
-        this.el.appendChild(settingsBtn);
 
         // Compact Stats Toggle
         const compactBtn = document.createElement('button');
         compactBtn.className = `style-action-btn ${d.style.compactStats ? 'active' : ''}`;
         compactBtn.innerHTML = `📊`;
         compactBtn.title = 'Toggle Compact Statistics Badge';
-        compactBtn.addEventListener('click', () => {
+        compactBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const compactStats = !d.style.compactStats;
           this.updateStyle({ compactStats });
         });
         this.el.appendChild(compactBtn);
+      }
+
+      // 4b. Background Fill Toggle for Shapes & Channels
+      const isShapeWithFill = [
+        'rectangle',
+        'rotated_rectangle',
+        'circle',
+        'ellipse',
+        'triangle',
+        'parallel_channel',
+        'equidistant_channel',
+        'fib_channel',
+        'gann_box',
+      ].includes(d.type);
+
+      if (isShapeWithFill) {
+        this.addSep();
+        const fillToggleBtn = document.createElement('button');
+        const isFilled = d.style.fillBackground !== false;
+        fillToggleBtn.className = `style-prop-btn ${isFilled ? 'active' : ''}`;
+        fillToggleBtn.textContent = 'Fill';
+        fillToggleBtn.title = isFilled ? 'Disable Background Fill' : 'Enable Background Fill';
+        fillToggleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.updateStyle({ fillBackground: !isFilled });
+        });
+        this.el.appendChild(fillToggleBtn);
       }
 
       // 5. Text Input (if drawing has text/callout)
@@ -205,10 +273,15 @@ export class DrawingStyleEditor {
         const textInput = document.createElement('input');
         textInput.type = 'text';
         textInput.className = 'style-text-input';
-        textInput.value = d.style.text || '';
+        textInput.value = d.style.textOptions?.content ?? d.style.text ?? '';
         textInput.placeholder = 'Label text…';
         textInput.addEventListener('input', () => {
-          this.updateStyle({ text: textInput.value });
+          this.updateStyle({
+            text: textInput.value,
+            textOptions: d.style.textOptions
+              ? { ...d.style.textOptions, content: textInput.value }
+              : undefined,
+          });
         });
         this.el.appendChild(textInput);
       }
@@ -243,6 +316,17 @@ export class DrawingStyleEditor {
       });
       actionsGroup.appendChild(visBtn);
 
+      // Settings
+      const settingsBtn = document.createElement('button');
+      settingsBtn.className = 'style-action-btn settings-btn';
+      settingsBtn.innerHTML = getIcon('settings');
+      settingsBtn.title = 'Drawing Settings';
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openSettingsDialog(d);
+      });
+      actionsGroup.appendChild(settingsBtn);
+
       // Duplicate
       const dupBtn = document.createElement('button');
       dupBtn.className = 'style-action-btn';
@@ -265,6 +349,31 @@ export class DrawingStyleEditor {
       actionsGroup.appendChild(delBtn);
 
       this.el.appendChild(actionsGroup);
+    } else if (this.activeTool) {
+      this.addSep();
+      const actionsGroup = document.createElement('div');
+      actionsGroup.className = 'style-btn-group';
+
+      const settingsBtn = document.createElement('button');
+      settingsBtn.className = 'style-action-btn settings-btn';
+      settingsBtn.innerHTML = getIcon('settings');
+      settingsBtn.title = `${this.activeTool.replace(/_/g, ' ').toUpperCase()} Default Settings`;
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const syntheticDrawing: DrawingDefinition = {
+          id: `preset_${this.activeTool}`,
+          type: this.activeTool!,
+          symbol: (this.engine as any).currentSymbol || '',
+          timeframe: (this.engine as any).currentTimeframe || '',
+          points: [],
+          style: { ...this.engine.getToolDefaultStyle(this.activeTool!) },
+          locked: false,
+          visible: true,
+        };
+        this.openSettingsDialog(syntheticDrawing);
+      });
+      actionsGroup.appendChild(settingsBtn);
+      this.el.appendChild(actionsGroup);
     }
   }
 
@@ -278,403 +387,6 @@ export class DrawingStyleEditor {
       tpPrice: metrics.tpPrice,
       lotSize: metrics.lotSize,
     });
-  }
-
-  private renderSettingsModal(d: DrawingDefinition): void {
-    const existing = document.getElementById('pos-settings-modal-overlay');
-    if (existing) existing.remove();
-
-    const isPosition = d.type === 'long_position' || d.type === 'short_position';
-    const isLong = d.type === 'long_position';
-    const metrics = isPosition
-      ? calculatePositionMetrics(d.type as any, d.points, d.style)
-      : null;
-
-    const overlay = document.createElement('div');
-    overlay.id = 'pos-settings-modal-overlay';
-    overlay.className = 'tv-modal-overlay';
-
-    const dialog = document.createElement('div');
-    dialog.className = 'tv-modal-container pos-settings-dialog';
-
-    if (isPosition && metrics) {
-      dialog.innerHTML = `
-        <div class="tv-modal-header">
-          <div class="tv-modal-title">
-            <span class="pos-badge ${isLong ? 'long' : 'short'}">${isLong ? '🟢 LONG' : '🔴 SHORT'} POSITION SETTINGS</span>
-            <span class="pos-sym-subtitle">${d.symbol} · ${d.timeframe}</span>
-          </div>
-          <button class="tv-modal-close" id="pos-modal-close">✕</button>
-        </div>
-
-        <div class="tv-modal-tabs">
-          <button class="tv-modal-tab active" id="tab-btn-inputs" type="button">Inputs</button>
-          <button class="tv-modal-tab" id="tab-btn-style" type="button">Style</button>
-        </div>
-
-        <div class="tv-modal-body">
-          <div class="pos-tab-panel" id="panel-inputs" style="display: block;">
-            <div class="pos-input-grid">
-              <div class="pos-field-group">
-                <label>Account Size ($):</label>
-                <input type="number" id="inp-acc-size" value="${d.style.accountSize || 10000}" step="500" min="100">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Account Currency:</label>
-                <input type="text" id="inp-acc-currency" value="${d.style.accountCurrency || 'USD'}" maxlength="6">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Risk Mode:</label>
-                <select id="inp-risk-mode">
-                  <option value="PERCENT" ${(d.style.riskMode || 'PERCENT') === 'PERCENT' ? 'selected' : ''}>% of Account</option>
-                  <option value="CASH" ${d.style.riskMode === 'CASH' ? 'selected' : ''}>$ Cash Amount</option>
-                </select>
-              </div>
-
-              <div class="pos-field-group">
-                <label id="inp-risk-val-label">${d.style.riskMode === 'CASH' ? 'Risk Amount ($):' : 'Risk Percentage (%):'}</label>
-                <input type="number" id="inp-risk-val" value="${d.style.riskMode === 'CASH' ? d.style.riskAmount || 100 : d.style.riskPercent || 1.0}" step="0.1" min="0.01">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Entry Price:</label>
-                <input type="number" id="inp-entry-price" value="${d.points[0].price}" step="0.0001">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Account Leverage:</label>
-                <select id="inp-leverage">
-                  ${[1, 2, 5, 10, 20, 30, 50, 100].map((lev) => `<option value="${lev}" ${(d.style.leverage ?? 1) === lev ? 'selected' : ''}>${lev}x</option>`).join('')}
-                </select>
-              </div>
-
-              <div class="pos-field-group">
-                <label>Take Profit Target:</label>
-                <input type="number" id="inp-tp-price" value="${metrics.tpPrice}" step="0.0001">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Stop Loss Target:</label>
-                <input type="number" id="inp-sl-price" value="${metrics.slPrice}" step="0.0001">
-              </div>
-            </div>
-
-            <div class="pos-summary-card">
-              <div class="pos-card-row">
-                <span>Calculated Lot Size:</span>
-                <strong id="card-lots">${metrics.lotSize.toFixed(2)} Lots</strong>
-              </div>
-              <div class="pos-card-row">
-                <span>Risk / Reward Ratio:</span>
-                <strong id="card-rr">1 : ${metrics.rrRatio}</strong>
-              </div>
-              <div class="pos-card-row">
-                <span>Max Risk:</span>
-                <span class="text-red" id="card-risk">-$${metrics.lossDollar.toFixed(2)} (-${metrics.slPips.toFixed(1)} pips)</span>
-              </div>
-              <div class="pos-card-row">
-                <span>Estimated Profit:</span>
-                <span class="text-green" id="card-profit">+$${metrics.profitDollar.toFixed(2)} (+${metrics.tpPips.toFixed(1)} pips)</span>
-              </div>
-              <div class="pos-card-row" id="card-margin-row" style="display: ${metrics.isMarginExceeded ? 'flex' : 'none'};">
-                <span style="color: #ff9800; font-weight: 700;">⚠️ Margin Alert:</span>
-                <span style="color: #ff9800; font-weight: 600;">Margin Required > Equity</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="pos-tab-panel" id="panel-style" style="display: none;">
-            <div class="pos-input-grid">
-              <div class="pos-field-group">
-                <label>Target Zone Color:</label>
-                <input type="color" id="inp-target-color" value="${d.style.targetColor || '#089981'}">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Target Opacity:</label>
-                <div class="pos-slider-row">
-                  <input type="range" id="inp-target-opacity" min="0" max="100" value="${Math.round((d.style.targetOpacity ?? 0.20) * 100)}">
-                  <span class="pos-slider-val" id="val-target-opacity">${Math.round((d.style.targetOpacity ?? 0.20) * 100)}%</span>
-                </div>
-              </div>
-
-              <div class="pos-field-group">
-                <label>Stop Zone Color:</label>
-                <input type="color" id="inp-stop-color" value="${d.style.stopColor || '#f23645'}">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Stop Opacity:</label>
-                <div class="pos-slider-row">
-                  <input type="range" id="inp-stop-opacity" min="0" max="100" value="${Math.round((d.style.stopOpacity ?? 0.20) * 100)}">
-                  <span class="pos-slider-val" id="val-stop-opacity">${Math.round((d.style.stopOpacity ?? 0.20) * 100)}%</span>
-                </div>
-              </div>
-
-              <div class="pos-field-group">
-                <label>Entry Line Color:</label>
-                <input type="color" id="inp-entry-color" value="${d.style.color || '#2962ff'}">
-              </div>
-
-              <div class="pos-field-group">
-                <label>Line Width:</label>
-                <select id="inp-line-width">
-                  <option value="1" ${d.style.width === 1 ? 'selected' : ''}>1px</option>
-                  <option value="2" ${d.style.width === 2 ? 'selected' : ''}>2px</option>
-                  <option value="3" ${d.style.width === 3 ? 'selected' : ''}>3px</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="pos-checkbox-list">
-              <label class="pos-checkbox-group">
-                <input type="checkbox" id="inp-show-prices" ${d.style.showPrices !== false ? 'checked' : ''}>
-                Show Price Labels on Axis
-              </label>
-              <label class="pos-checkbox-group">
-                <input type="checkbox" id="inp-always-show-stats" ${d.style.alwaysShowStats ? 'checked' : ''}>
-                Always Show Stats (even when unselected)
-              </label>
-              <label class="pos-checkbox-group">
-                <input type="checkbox" id="inp-compact-stats" ${d.style.compactStats ? 'checked' : ''}>
-                Compact Statistics View
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="tv-modal-footer">
-          <button class="tv-modal-btn trade" id="pos-modal-trade">⚡ Create Order</button>
-          <div class="tv-modal-footer-right">
-            <button class="tv-modal-btn cancel" id="pos-modal-cancel">Cancel</button>
-            <button class="tv-modal-btn save" id="pos-modal-save">Save Settings</button>
-          </div>
-        </div>
-      `;
-
-      // Tab listeners
-      const tabBtnInputs = dialog.querySelector<HTMLButtonElement>('#tab-btn-inputs');
-      const tabBtnStyle = dialog.querySelector<HTMLButtonElement>('#tab-btn-style');
-      const panelInputs = dialog.querySelector<HTMLElement>('#panel-inputs');
-      const panelStyle = dialog.querySelector<HTMLElement>('#panel-style');
-
-      tabBtnInputs?.addEventListener('click', () => {
-        tabBtnInputs.classList.add('active');
-        tabBtnStyle?.classList.remove('active');
-        if (panelInputs) panelInputs.style.display = 'block';
-        if (panelStyle) panelStyle.style.display = 'none';
-      });
-
-      tabBtnStyle?.addEventListener('click', () => {
-        tabBtnStyle.classList.add('active');
-        tabBtnInputs?.classList.remove('active');
-        if (panelInputs) panelInputs.style.display = 'none';
-        if (panelStyle) panelStyle.style.display = 'block';
-      });
-
-      // Opacity slider percentage readouts
-      const inpTargetOpacity = dialog.querySelector<HTMLInputElement>('#inp-target-opacity');
-      const valTargetOpacity = dialog.querySelector<HTMLElement>('#val-target-opacity');
-      inpTargetOpacity?.addEventListener('input', () => {
-        if (valTargetOpacity) valTargetOpacity.textContent = `${inpTargetOpacity.value}%`;
-      });
-
-      const inpStopOpacity = dialog.querySelector<HTMLInputElement>('#inp-stop-opacity');
-      const valStopOpacity = dialog.querySelector<HTMLElement>('#val-stop-opacity');
-      inpStopOpacity?.addEventListener('input', () => {
-        if (valStopOpacity) valStopOpacity.textContent = `${inpStopOpacity.value}%`;
-      });
-
-      // Real-time live updating of risk analytics card
-      const updateSummaryCard = () => {
-        const accSize = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-acc-size')?.value || '10000');
-        const riskMode = (dialog.querySelector<HTMLSelectElement>('#inp-risk-mode')?.value || 'PERCENT') as 'PERCENT' | 'CASH';
-        const riskVal = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-risk-val')?.value || '1.0');
-        const entryPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-entry-price')?.value || d.points[0]?.price?.toString() || '1.0');
-        const tpPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-tp-price')?.value || (d.points[1]?.price ?? entryPx * 1.02).toString());
-        const slPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-sl-price')?.value || (d.points[2]?.price ?? entryPx * 0.99).toString());
-        const leverageVal = parseFloat(dialog.querySelector<HTMLSelectElement>('#inp-leverage')?.value || '1');
-
-        const liveMetrics = calculateFinancialPosition({
-          type: d.type as 'long_position' | 'short_position',
-          entryPrice: entryPx,
-          tpPrice: tpPx,
-          slPrice: slPx,
-          accountSize: accSize,
-          riskMode,
-          riskPercent: riskMode === 'PERCENT' ? riskVal : undefined,
-          riskAmount: riskMode === 'CASH' ? riskVal : undefined,
-          leverage: leverageVal,
-          symbol: d.symbol,
-        });
-
-        const cardLots = dialog.querySelector('#card-lots');
-        const cardRr = dialog.querySelector('#card-rr');
-        const cardRisk = dialog.querySelector('#card-risk');
-        const cardProfit = dialog.querySelector('#card-profit');
-        const cardMarginRow = dialog.querySelector<HTMLElement>('#card-margin-row');
-
-        if (cardLots) cardLots.textContent = `${liveMetrics.lotSize.toFixed(2)} Lots`;
-        if (cardRr) cardRr.textContent = `1 : ${liveMetrics.rrRatio}`;
-        if (cardRisk) cardRisk.textContent = `-$${liveMetrics.lossDollar.toFixed(2)} (-${liveMetrics.slPips.toFixed(1)} pips)`;
-        if (cardProfit) cardProfit.textContent = `+$${liveMetrics.profitDollar.toFixed(2)} (+${liveMetrics.tpPips.toFixed(1)} pips)`;
-        if (cardMarginRow) {
-          cardMarginRow.style.display = liveMetrics.isMarginExceeded ? 'flex' : 'none';
-        }
-      };
-
-      // Risk mode toggle update
-      const modeSelect = dialog.querySelector<HTMLSelectElement>('#inp-risk-mode');
-      const valLabel = dialog.querySelector('#inp-risk-val-label');
-      if (modeSelect && valLabel) {
-        modeSelect.addEventListener('change', () => {
-          valLabel.textContent =
-            modeSelect.value === 'CASH' ? 'Risk Amount ($):' : 'Risk Percentage (%):';
-          updateSummaryCard();
-        });
-      }
-
-      const inputIds = [
-        '#inp-acc-size',
-        '#inp-risk-val',
-        '#inp-entry-price',
-        '#inp-tp-price',
-        '#inp-sl-price',
-        '#inp-leverage',
-      ];
-      for (const id of inputIds) {
-        const inputEl = dialog.querySelector(id);
-        inputEl?.addEventListener('input', updateSummaryCard);
-        inputEl?.addEventListener('change', updateSummaryCard);
-      }
-
-      // Close handlers
-      dialog.querySelector('#pos-modal-close')?.addEventListener('click', () => overlay.remove());
-      dialog.querySelector('#pos-modal-cancel')?.addEventListener('click', () => overlay.remove());
-
-      // Trade handler
-      dialog.querySelector('#pos-modal-trade')?.addEventListener('click', () => {
-        overlay.remove();
-        this.executeTradeFromDrawing(d);
-      });
-
-      // Save Handler
-      dialog.querySelector('#pos-modal-save')?.addEventListener('click', () => {
-        const accSize = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-acc-size')?.value || '10000');
-        const accCurrency = dialog.querySelector<HTMLInputElement>('#inp-acc-currency')?.value || 'USD';
-        const riskMode = (dialog.querySelector<HTMLSelectElement>('#inp-risk-mode')?.value || 'PERCENT') as 'PERCENT' | 'CASH';
-        const riskVal = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-risk-val')?.value || '1.0');
-        const entryPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-entry-price')?.value || d.points[0].price.toString());
-        const tpPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-tp-price')?.value || (d.points[1]?.price ?? entryPx).toString());
-        const slPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-sl-price')?.value || (d.points[2]?.price ?? entryPx).toString());
-        const leverageVal = parseFloat(dialog.querySelector<HTMLSelectElement>('#inp-leverage')?.value || '1');
-
-        let finalTpPx = tpPx;
-        let finalSlPx = slPx;
-        const minGap = (entryPx > 1000 ? 1.0 : entryPx > 50 ? 0.01 : 0.0001) * 0.5;
-
-        if (isLong) {
-          finalTpPx = Math.max(entryPx + minGap, tpPx);
-          finalSlPx = Math.min(entryPx - minGap, slPx);
-        } else {
-          finalTpPx = Math.min(entryPx - minGap, tpPx);
-          finalSlPx = Math.max(entryPx + minGap, slPx);
-        }
-
-        d.points[0].price = entryPx;
-        if (!d.points[1]) d.points[1] = { ...d.points[0] };
-        d.points[1].price = finalTpPx;
-        if (!d.points[2]) d.points[2] = { ...d.points[0] };
-        d.points[2].price = finalSlPx;
-
-        const targetColor = dialog.querySelector<HTMLInputElement>('#inp-target-color')?.value || d.style.targetColor || '#089981';
-        const stopColor = dialog.querySelector<HTMLInputElement>('#inp-stop-color')?.value || d.style.stopColor || '#f23645';
-        const entryColor = dialog.querySelector<HTMLInputElement>('#inp-entry-color')?.value || d.style.color || '#2962ff';
-        const lineWidth = parseInt(dialog.querySelector<HTMLSelectElement>('#inp-line-width')?.value || '2', 10);
-        const targetOpacity = (parseInt(dialog.querySelector<HTMLInputElement>('#inp-target-opacity')?.value || '20', 10)) / 100;
-        const stopOpacity = (parseInt(dialog.querySelector<HTMLInputElement>('#inp-stop-opacity')?.value || '20', 10)) / 100;
-
-        const showPrices = dialog.querySelector<HTMLInputElement>('#inp-show-prices')?.checked ?? true;
-        const alwaysShowStats = dialog.querySelector<HTMLInputElement>('#inp-always-show-stats')?.checked ?? false;
-        const compactStats = dialog.querySelector<HTMLInputElement>('#inp-compact-stats')?.checked ?? false;
-
-        const styleUpdates: Partial<DrawingStyle> = {
-          accountSize: accSize,
-          accountCurrency: accCurrency,
-          riskMode,
-          riskPercent: riskMode === 'PERCENT' ? riskVal : undefined,
-          riskAmount: riskMode === 'CASH' ? riskVal : undefined,
-          leverage: leverageVal,
-          targetColor,
-          stopColor,
-          color: entryColor,
-          width: lineWidth,
-          targetOpacity,
-          stopOpacity,
-          showPrices,
-          alwaysShowStats,
-          compactStats,
-        };
-
-        this.updateStyle(styleUpdates);
-        this.engine.redraw();
-        overlay.remove();
-      });
-    } else {
-      // Non-position drawing settings modal
-      dialog.innerHTML = `
-        <div class="tv-modal-header">
-          <div class="tv-modal-title">
-            <span class="pos-badge">${d.type.replace(/_/g, ' ').toUpperCase()} SETTINGS</span>
-            <span class="pos-sym-subtitle">${d.symbol} · ${d.timeframe}</span>
-          </div>
-          <button class="tv-modal-close" id="pos-modal-close">✕</button>
-        </div>
-
-        <div class="tv-modal-body">
-          <div class="pos-input-grid">
-            <div class="pos-field-group">
-              <label>Line / Border Color:</label>
-              <input type="color" id="inp-entry-color" value="${d.style.color || '#2962ff'}">
-            </div>
-            <div class="pos-field-group">
-              <label>Line Width:</label>
-              <select id="inp-line-width">
-                <option value="1" ${d.style.width === 1 ? 'selected' : ''}>1px</option>
-                <option value="2" ${d.style.width === 2 ? 'selected' : ''}>2px</option>
-                <option value="3" ${d.style.width === 3 ? 'selected' : ''}>3px</option>
-                <option value="4" ${d.style.width === 4 ? 'selected' : ''}>4px</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="tv-modal-footer">
-          <div class="tv-modal-footer-right">
-            <button class="tv-modal-btn cancel" id="pos-modal-cancel">Cancel</button>
-            <button class="tv-modal-btn save" id="pos-modal-save">Save Settings</button>
-          </div>
-        </div>
-      `;
-
-      dialog.querySelector('#pos-modal-close')?.addEventListener('click', () => overlay.remove());
-      dialog.querySelector('#pos-modal-cancel')?.addEventListener('click', () => overlay.remove());
-      dialog.querySelector('#pos-modal-save')?.addEventListener('click', () => {
-        const entryColor = dialog.querySelector<HTMLInputElement>('#inp-entry-color')?.value || d.style.color || '#2962ff';
-        const lineWidth = parseInt(dialog.querySelector<HTMLSelectElement>('#inp-line-width')?.value || '2', 10);
-        this.updateStyle({
-          color: entryColor,
-          width: lineWidth,
-        });
-        this.engine.redraw();
-        overlay.remove();
-      });
-    }
-
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
   }
 
   private addSep(): void {

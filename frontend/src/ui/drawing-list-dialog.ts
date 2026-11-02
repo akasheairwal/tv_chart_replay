@@ -129,6 +129,7 @@ export class DrawingListDialog {
             </div>
           </div>
           <div class="drawing-item-actions">
+            <button class="item-action-btn settings-btn" title="Settings">${getIcon('settings')}</button>
             <button class="item-action-btn vis-btn" title="${d.visible ? 'Hide' : 'Show'}">${d.visible ? getIcon('eye') : getIcon('eye_off')}</button>
             <button class="item-action-btn lock-btn" title="${d.locked ? 'Unlock' : 'Lock'}">${d.locked ? getIcon('lock') : getIcon('unlock')}</button>
             <button class="item-action-btn delete-btn" title="Delete">${getIcon('trash')}</button>
@@ -138,6 +139,15 @@ export class DrawingListDialog {
         itemEl.querySelector('.drawing-item-info')?.addEventListener('click', () => {
           this.engine.selectDrawing(d.id);
           this.hide();
+        });
+
+        itemEl.querySelector('.settings-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.hide();
+          this.engine.selectDrawing(d.id);
+          if (this.engine.onOpenDrawingSettings) {
+            this.engine.onOpenDrawingSettings(d);
+          }
         });
 
         itemEl.querySelector('.vis-btn')?.addEventListener('click', (e) => {
