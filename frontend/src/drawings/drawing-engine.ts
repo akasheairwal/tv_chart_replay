@@ -12,6 +12,7 @@ import {
   distanceToPoint,
   distanceToRay,
   distanceToSegment,
+  getRectangle8Handles,
   snapToCandleOHLC,
   formatDuration,
   formatVolume,
@@ -1135,6 +1136,10 @@ export class DrawingEngine implements IDrawingShortcutTarget {
             else if (hIdx === 3) cursor = 'ew-resize';
             else if (hIdx === 4) cursor = 'nwse-resize';
             else if (hIdx === 5) cursor = 'nesw-resize';
+          } else if (selected.type === 'rectangle' && selected.points.length >= 2) {
+            const handles8 = getRectangle8Handles(selected.points);
+            const found = handles8.find((h) => h.index === hIdx);
+            if (found) cursor = found.cursor;
           }
           return { hit: true, cursor, isHandle: true };
         }
@@ -1188,20 +1193,36 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       ) {
         const selected = this.drawings.find((d) => d.id === this.selectedDrawingId);
         if (selected && selected.points.length > 0) {
-          const anchorIdx =
-            this.activeHandleIndex === 0
-              ? Math.min(1, selected.points.length - 1)
-              : Math.max(0, this.activeHandleIndex - 1);
-          const anchorChart = selected.points[anchorIdx];
-          if (anchorChart) {
-            const anchorPix = this.chartToPixel(anchorChart);
-            if (anchorPix) {
-              if (selected.type === 'rectangle' || selected.type === 'gann_box') {
-                result = constrainSquare(pos, anchorPix);
-              } else if (selected.type === 'ellipse' || selected.type === 'circle') {
-                result = constrainCircle(pos, anchorPix);
-              } else {
-                result = constrainPointAngle(pos, anchorPix);
+          if (selected.type === 'rectangle') {
+            // For rectangle corners 0..3: constrain to square relative to diagonally opposite corner
+            if (this.activeHandleIndex >= 0 && this.activeHandleIndex <= 3) {
+              const basePts = this.originalPoints.length > 0 ? this.originalPoints : selected.points;
+              const handles8 = getRectangle8Handles(basePts);
+              const oppIdx = (this.activeHandleIndex + 2) % 4;
+              const oppHandle = handles8[oppIdx];
+              if (oppHandle) {
+                const anchorPix = this.chartToPixel(oppHandle.point);
+                if (anchorPix) {
+                  result = constrainSquare(pos, anchorPix);
+                }
+              }
+            }
+          } else {
+            const anchorIdx =
+              this.activeHandleIndex === 0
+                ? Math.min(1, selected.points.length - 1)
+                : Math.max(0, this.activeHandleIndex - 1);
+            const anchorChart = selected.points[anchorIdx];
+            if (anchorChart) {
+              const anchorPix = this.chartToPixel(anchorChart);
+              if (anchorPix) {
+                if (selected.type === 'gann_box') {
+                  result = constrainSquare(pos, anchorPix);
+                } else if (selected.type === 'ellipse' || selected.type === 'circle') {
+                  result = constrainCircle(pos, anchorPix);
+                } else {
+                  result = constrainPointAngle(pos, anchorPix);
+                }
               }
             }
           }
@@ -1491,6 +1512,12 @@ export class DrawingEngine implements IDrawingShortcutTarget {
           this.activeHandleIndex = handleIdx;
           this.pointerDownPos = rawPos;
           this.pointerDragDist = 0;
+          this.originalPoints = selected.points.map((p) => ({ ...p }));
+          if (selected.type === 'rectangle' && selected.points.length >= 2) {
+            const handles8 = getRectangle8Handles(selected.points);
+            const found = handles8.find((h) => h.index === handleIdx);
+            if (found) this.container.style.cursor = found.cursor;
+          }
           try {
             this.container.setPointerCapture(e.pointerId);
           } catch {
@@ -1806,7 +1833,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     }
 
     if (this.pointerDownPos) {
-      this.pointerDragDist += Math.hypot(
+      this.pointerDragDist = Math.hypot(
         pos.x - this.pointerDownPos.x,
         pos.y - this.pointerDownPos.y,
       );
@@ -1966,11 +1993,12 @@ export class DrawingEngine implements IDrawingShortcutTarget {
           );
         }
       } else {
+        const basePoints = this.originalPoints.length > 0 ? this.originalPoints : selected.points;
         const solved = solveToolHandleConstraint(
           selected.type,
           this.activeHandleIndex,
           chartPos,
-          selected.points,
+          basePoints,
           selected.style,
           { isShiftPressed: this.isShiftPressed },
         );
@@ -2051,7 +2079,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       this.interactionState === 'DRAWING' &&
       this.draftPoints.length === 2 &&
       getRequiredPointCount(this.currentTool) === 2 &&
-      this.pointerDragDist > 20
+      this.pointerDragDist > 8
     ) {
       const rawPos = this.getCanvasPos(e);
       const isMac =
@@ -2109,6 +2137,16 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     const tfSec = getTimeframeSeconds(this.currentTimeframe);
 
     let committedPoints = points;
+    if (this.currentTool === 'rectangle' && points.length >= 2) {
+      const minT = Math.min(points[0].timestamp, points[1].timestamp);
+      const maxT = Math.max(points[0].timestamp, points[1].timestamp);
+      const minP = Math.min(points[0].price, points[1].price);
+      const maxP = Math.max(points[0].price, points[1].price);
+      committedPoints = [
+        { timestamp: minT, price: minP },
+        { timestamp: maxT, price: maxP },
+      ];
+    }
     if (this.currentTool === 'long_position' || this.currentTool === 'short_position') {
       const entryPoint = points[0];
       const entryPrice = entryPoint.price;
@@ -2301,6 +2339,26 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     ) {
       return isPointInRect(px, py, p1.x, p1.y, p2.x, p2.y);
     }
+    if (d.type === 'rotated_rectangle') {
+      if (p3) {
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 0) {
+          const nx = -dy / len;
+          const ny = dx / len;
+          const vx = p3.x - p2.x;
+          const vy = p3.y - p2.y;
+          const perpDist = vx * nx + vy * ny;
+          const hx = nx * perpDist;
+          const hy = ny * perpDist;
+          const p3Calc = { x: p2.x + hx, y: p2.y + hy };
+          const p4Calc = { x: p1.x + hx, y: p1.y + hy };
+          return isPointInPolygon(px, py, [p1, p2, p3Calc, p4Calc]);
+        }
+      }
+      return distanceToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= 8;
+    }
     if (d.type === 'ellipse') {
       return isPointInEllipse(px, py, p1.x, p1.y, p2.x, p2.y);
     }
@@ -2465,6 +2523,17 @@ export class DrawingEngine implements IDrawingShortcutTarget {
           if (p && distanceToPoint(px, py, p.x, p.y) <= 8) {
             return idx;
           }
+        }
+      }
+      return -1;
+    }
+
+    if (d.type === 'rectangle' && d.points.length >= 2) {
+      const handles8 = getRectangle8Handles(d.points);
+      for (const h of handles8) {
+        const pix = this.chartToPixel(h.point);
+        if (pix && distanceToPoint(px, py, pix.x, pix.y) <= 8) {
+          return h.index;
         }
       }
       return -1;

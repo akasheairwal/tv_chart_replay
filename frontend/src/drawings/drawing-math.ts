@@ -1009,7 +1009,9 @@ export function getRectangle8Handles(points: DrawingPoint[]): RectangleHandleInf
 
 /**
  * Solves topological constraints for Rectangle handle dragging.
- * Handles 0..3 resize both dimensions; Handles 4 & 6 resize ONLY price; Handles 5 & 7 resize ONLY time.
+ * Handles 0..3 resize both dimensions with diagonally opposite anchor invariant;
+ * Handles 4 & 6 resize ONLY price; Handles 5 & 7 resize ONLY time.
+ * Supports smooth cross-boundary drags without inversion glitches.
  */
 export function solveRectangleHandleDrag(
   handleIndex: number,
@@ -1021,55 +1023,72 @@ export function solveRectangleHandleDrag(
   const p1 = currentPoints[0];
   const p2 = currentPoints[1];
 
-  let minT = Math.min(p1.timestamp, p2.timestamp);
-  let maxT = Math.max(p1.timestamp, p2.timestamp);
-  let minP = Math.min(p1.price, p2.price);
-  let maxP = Math.max(p1.price, p2.price);
+  const minT = Math.min(p1.timestamp, p2.timestamp);
+  const maxT = Math.max(p1.timestamp, p2.timestamp);
+  const minP = Math.min(p1.price, p2.price);
+  const maxP = Math.max(p1.price, p2.price);
+
+  let newMinT = minT;
+  let newMaxT = maxT;
+  let newMinP = minP;
+  let newMaxP = maxP;
 
   switch (handleIndex) {
-    // Corner 0: Top-Left (adjusts minT and maxP)
+    // Corner 0: Top-Left (invariant anchor is Bottom-Right: maxT, minP)
     case 0:
-      minT = draggedPoint.timestamp;
-      maxP = draggedPoint.price;
+      newMinT = Math.min(maxT, draggedPoint.timestamp);
+      newMaxT = Math.max(maxT, draggedPoint.timestamp);
+      newMinP = Math.min(minP, draggedPoint.price);
+      newMaxP = Math.max(minP, draggedPoint.price);
       break;
-    // Corner 1: Top-Right (adjusts maxT and maxP)
+    // Corner 1: Top-Right (invariant anchor is Bottom-Left: minT, minP)
     case 1:
-      maxT = draggedPoint.timestamp;
-      maxP = draggedPoint.price;
+      newMinT = Math.min(minT, draggedPoint.timestamp);
+      newMaxT = Math.max(minT, draggedPoint.timestamp);
+      newMinP = Math.min(minP, draggedPoint.price);
+      newMaxP = Math.max(minP, draggedPoint.price);
       break;
-    // Corner 2: Bottom-Right (adjusts maxT and minP)
+    // Corner 2: Bottom-Right (invariant anchor is Top-Left: minT, maxP)
     case 2:
-      maxT = draggedPoint.timestamp;
-      minP = draggedPoint.price;
+      newMinT = Math.min(minT, draggedPoint.timestamp);
+      newMaxT = Math.max(minT, draggedPoint.timestamp);
+      newMinP = Math.min(maxP, draggedPoint.price);
+      newMaxP = Math.max(maxP, draggedPoint.price);
       break;
-    // Corner 3: Bottom-Left (adjusts minT and minP)
+    // Corner 3: Bottom-Left (invariant anchor is Top-Right: maxT, maxP)
     case 3:
-      minT = draggedPoint.timestamp;
-      minP = draggedPoint.price;
+      newMinT = Math.min(maxT, draggedPoint.timestamp);
+      newMaxT = Math.max(maxT, draggedPoint.timestamp);
+      newMinP = Math.min(maxP, draggedPoint.price);
+      newMaxP = Math.max(maxP, draggedPoint.price);
       break;
-    // Edge Midpoint 4: Top Edge (adjusts ONLY maxP)
+    // Edge Midpoint 4: Top Edge (anchor is Bottom Edge: minP; minT and maxT invariant)
     case 4:
-      maxP = draggedPoint.price;
+      newMinP = Math.min(minP, draggedPoint.price);
+      newMaxP = Math.max(minP, draggedPoint.price);
       break;
-    // Edge Midpoint 5: Right Edge (adjusts ONLY maxT)
+    // Edge Midpoint 5: Right Edge (anchor is Left Edge: minT; minP and maxP invariant)
     case 5:
-      maxT = draggedPoint.timestamp;
+      newMinT = Math.min(minT, draggedPoint.timestamp);
+      newMaxT = Math.max(minT, draggedPoint.timestamp);
       break;
-    // Edge Midpoint 6: Bottom Edge (adjusts ONLY minP)
+    // Edge Midpoint 6: Bottom Edge (anchor is Top Edge: maxP; minT and maxT invariant)
     case 6:
-      minP = draggedPoint.price;
+      newMinP = Math.min(maxP, draggedPoint.price);
+      newMaxP = Math.max(maxP, draggedPoint.price);
       break;
-    // Edge Midpoint 7: Left Edge (adjusts ONLY minT)
+    // Edge Midpoint 7: Left Edge (anchor is Right Edge: maxT; minP and maxP invariant)
     case 7:
-      minT = draggedPoint.timestamp;
+      newMinT = Math.min(maxT, draggedPoint.timestamp);
+      newMaxT = Math.max(maxT, draggedPoint.timestamp);
       break;
     default:
       return currentPoints;
   }
 
   return [
-    { timestamp: minT, price: minP },
-    { timestamp: maxT, price: maxP },
+    { timestamp: newMinT, price: newMinP },
+    { timestamp: newMaxT, price: newMaxP },
   ];
 }
 
