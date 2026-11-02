@@ -403,6 +403,7 @@ export function calculatePositionMetricsFromStyle(
       riskPercent: style.riskPercent,
       riskAmount: style.riskAmount,
       lotSize: style.lotSize,
+      leverage: style.leverage,
       symbol,
     },
     fallbackAccountBalance,

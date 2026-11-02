@@ -44,6 +44,42 @@ function resolveBarStats(
   return { barCount, durText, volText };
 }
 
+/**
+ * Resolves a color string and opacity into an rgba(...) CSS string.
+ * Supports #rgb, #rgba, #rrggbb, #rrggbbaa, rgb(...), rgba(...), and basic named colors.
+ */
+export function colorWithOpacity(color: string, opacity: number): string {
+  if (!color) return `rgba(8, 153, 129, ${opacity})`;
+  const clamped = Math.max(0, Math.min(1, opacity));
+  const trimmed = color.trim();
+
+  if (trimmed.startsWith('rgba(')) {
+    return trimmed.replace(/[\d\.]+\s*\)$/, `${clamped})`);
+  }
+  if (trimmed.startsWith('rgb(')) {
+    return trimmed.replace('rgb(', 'rgba(').replace(')', `, ${clamped})`);
+  }
+  if (trimmed.startsWith('#')) {
+    let hex = trimmed.slice(1);
+    if (hex.length === 3 || hex.length === 4) {
+      hex = hex.split('').map((c) => c + c).join('').slice(0, 6);
+    }
+    if (hex.length >= 6) {
+      const r = parseInt(hex.substring(0, 2), 16) || 0;
+      const g = parseInt(hex.substring(2, 4), 16) || 0;
+      const b = parseInt(hex.substring(4, 6), 16) || 0;
+      return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+    }
+  }
+
+  const namedMap: Record<string, string> = {
+    green: `rgba(8, 153, 129, ${clamped})`,
+    red: `rgba(242, 54, 69, ${clamped})`,
+    blue: `rgba(41, 98, 255, ${clamped})`,
+  };
+  return namedMap[trimmed.toLowerCase()] || trimmed;
+}
+
 export function renderDrawingOnCanvas(
   d: DrawingDefinition,
   isSelected: boolean,
@@ -1027,13 +1063,10 @@ export function renderDrawingOnCanvas(
           entryPrice,
           tpPrice,
           slPrice,
-          tpPips,
-          slPips,
           tpPct,
           slPct,
           rrRatio,
           lotSize,
-          riskAmount,
           profitDollar,
           lossDollar,
           endTimestamp,
@@ -1051,137 +1084,211 @@ export function renderDrawingOnCanvas(
         const leftX = p1.x;
         const rightX = Math.max(leftX + 5, endPixel?.x ?? (leftX + 30));
         const width = rightX - leftX;
-
-        const stats = getBarStats ? getBarStats(d.points[0].timestamp, endTimestamp) : null;
-        const barCount = stats
-          ? stats.barCount
-          : Math.max(1, Math.round(Math.abs(endTimestamp - d.points[0].timestamp) / 3600));
-        const durText = stats
-          ? stats.durationText
-          : formatDuration(endTimestamp - d.points[0].timestamp);
+        const centerX = (leftX + rightX) / 2;
 
         const targetColor = d.style.targetColor || '#089981';
         const stopColor = d.style.stopColor || '#f23645';
+        const targetOpacity = typeof d.style.targetOpacity === 'number' ? Math.max(0, Math.min(1, d.style.targetOpacity)) : 0.20;
+        const stopOpacity = typeof d.style.stopOpacity === 'number' ? Math.max(0, Math.min(1, d.style.stopOpacity)) : 0.20;
 
         const showStats = isSelected || (d.style.alwaysShowStats ?? false);
 
-        // 1. Target Box (Profit)
+        // Determine outcome: Loss if explicit negative PnL or outcome === 'loss'
+        const hasExplicitPnL = typeof d.style.closedPnL === 'number';
+        const isClosedLoss = d.style.outcome === 'loss' || (hasExplicitPnL && d.style.closedPnL! < 0);
+        const exitFraction = isClosedLoss ? 0.35 : 0.48;
+
+        const exitPixel = d.style.exitTimestamp
+          ? chartToPixel({ timestamp: d.style.exitTimestamp, price: d.style.exitPrice ?? (isClosedLoss ? slPrice : tpPrice) })
+          : null;
+        const splitX = exitPixel ? Math.min(rightX, Math.max(leftX, exitPixel.x)) : (leftX + width * exitFraction);
+        const exitY = exitPixel ? exitPixel.y : (isClosedLoss ? slY : tpY);
+        const wActive = Math.max(1, splitX - leftX);
+        const wProj = Math.max(0, rightX - splitX);
+
+        // 1. Target Box (Profit Zone)
         const topProfitY = Math.min(entryY, tpY);
         const profitHeight = Math.max(2, Math.abs(tpY - entryY));
-        ctx.fillStyle = 'rgba(8, 153, 129, 0.20)';
+
+        const tpActiveOpacity = isClosedLoss ? targetOpacity * 0.75 : Math.min(0.8, targetOpacity * 1.6);
+        ctx.fillStyle = colorWithOpacity(targetColor, tpActiveOpacity);
+        ctx.fillRect(leftX, topProfitY, wActive, profitHeight);
+        if (wProj > 0) {
+          ctx.fillStyle = colorWithOpacity(targetColor, targetOpacity);
+          ctx.fillRect(splitX, topProfitY, wProj, profitHeight);
+        }
         ctx.strokeStyle = targetColor;
-        ctx.lineWidth = 1.5;
-        ctx.fillRect(leftX, topProfitY, width, profitHeight);
+        ctx.lineWidth = 1;
         ctx.strokeRect(leftX, topProfitY, width, profitHeight);
 
-        // Target Tag Header/Footer (only rendered when selected or alwaysShowStats)
-        if (showStats) {
-          const tagY = isLong ? topProfitY - 20 : Math.max(entryY, tpY);
-          ctx.fillStyle = 'rgba(8, 153, 129, 0.95)';
-          const targetTagText = `Target: ${formatCrosshairPrice(tpPrice, d.symbol)} (+${tpPips.toFixed(1)} pips, +${tpPct.toFixed(2)}%) · +$${profitDollar.toFixed(2)}`;
-          ctx.font = 'bold 10px sans-serif';
-          const textLen = ctx.measureText ? ctx.measureText(targetTagText).width : targetTagText.length * 6;
-          const targetTagW = Math.max(170, textLen + 14);
-
-          ctx.beginPath();
-          if (typeof (ctx as any).roundRect === 'function') {
-            (ctx as any).roundRect(leftX, tagY, targetTagW, 20, 3);
-          } else {
-            ctx.rect(leftX, tagY, targetTagW, 20);
-          }
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(targetTagText, leftX + 6, tagY + 14);
-        }
-
-        // 2. Stop Box (Loss)
+        // 2. Stop Box (Risk Zone)
         const topLossY = Math.min(entryY, slY);
         const lossHeight = Math.max(2, Math.abs(slY - entryY));
-        ctx.fillStyle = 'rgba(242, 54, 69, 0.20)';
-        ctx.strokeStyle = stopColor;
-        ctx.lineWidth = 1.5;
-        ctx.fillRect(leftX, topLossY, width, lossHeight);
-        ctx.strokeRect(leftX, topLossY, width, lossHeight);
 
-        // Stop Tag Header/Footer (only rendered when selected or alwaysShowStats)
-        if (showStats) {
-          const stopTagY = isLong ? Math.max(entryY, slY) : topLossY - 20;
-          ctx.fillStyle = 'rgba(242, 54, 69, 0.95)';
-          const stopTagText = `Stop: ${formatCrosshairPrice(slPrice, d.symbol)} (-${slPips.toFixed(1)} pips, -${slPct.toFixed(2)}%) · -$${lossDollar.toFixed(2)}`;
-          const stopTextLen = ctx.measureText ? ctx.measureText(stopTagText).width : stopTagText.length * 6;
-          const stopTagW = Math.max(170, stopTextLen + 14);
-
-          ctx.beginPath();
-          if (typeof (ctx as any).roundRect === 'function') {
-            (ctx as any).roundRect(leftX, stopTagY, stopTagW, 20, 3);
-          } else {
-            ctx.rect(leftX, stopTagY, stopTagW, 20);
-          }
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(stopTagText, leftX + 6, stopTagY + 14);
+        const slActiveOpacity = isClosedLoss ? Math.min(0.8, stopOpacity * 1.6) : stopOpacity * 0.75;
+        ctx.fillStyle = colorWithOpacity(stopColor, slActiveOpacity);
+        ctx.fillRect(leftX, topLossY, wActive, lossHeight);
+        if (wProj > 0) {
+          ctx.fillStyle = colorWithOpacity(stopColor, stopOpacity);
+          ctx.fillRect(splitX, topLossY, wProj, lossHeight);
         }
+        ctx.strokeStyle = stopColor;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(leftX, topLossY, width, lossHeight);
 
         // 3. Entry Center Line
         ctx.strokeStyle = d.style.color || '#2962ff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(leftX, entryY);
         ctx.lineTo(rightX, entryY);
         ctx.stroke();
 
-        // 4. Center Summary Card (only rendered when selected)
+        // 4. Subtle Dashed Trade Trajectory Line (from entry to exit point)
+        ctx.save();
+        ctx.strokeStyle = 'rgba(160, 165, 175, 0.75)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(leftX, entryY);
+        ctx.lineTo(splitX, exitY);
+        ctx.stroke();
+        ctx.restore();
+
+        // Precisions and Formattings
+        const precision = d.style.lotPrecision !== undefined
+          ? d.style.lotPrecision
+          : entryPrice > 50 ? 2 : 4;
+        const tpDiff = Math.abs(tpPrice - entryPrice);
+        const slDiff = Math.abs(entryPrice - slPrice);
+        const tpDiffStr = tpDiff.toFixed(precision);
+        const slDiffStr = slDiff.toFixed(precision);
+        const tpPctStr = tpPct.toFixed(3);
+        const slPctStr = slPct.toFixed(3);
+        const pointSize = entryPrice > 50 ? 0.01 : (metrics.pipSize ? metrics.pipSize * 0.1 : 0.0001);
+        const tpTicks = Math.round(tpDiff / pointSize);
+        const slTicks = Math.round(slDiff / pointSize);
+        const profitAmountStr = profitDollar % 1 === 0 ? profitDollar.toFixed(0) : profitDollar.toFixed(2);
+        const lossAmountStr = lossDollar % 1 === 0 ? lossDollar.toFixed(0) : lossDollar.toFixed(2);
+
+        // 5. Target Tag Header/Footer Pill (Floating Centered Pill)
         if (showStats) {
+          const targetTagText = `Target: ${tpDiffStr} (${tpPctStr}%) ${tpTicks}, Amount: ${profitAmountStr}`;
+          ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+          const textLen = ctx.measureText ? ctx.measureText(targetTagText).width : targetTagText.length * 6.5;
+          const targetTagW = Math.max(160, textLen + 20);
+          const targetTagX = centerX - targetTagW / 2;
+          const tagY = isLong ? topProfitY - 26 : Math.max(entryY, tpY) + 6;
+
+          ctx.fillStyle = targetColor;
+          safeRoundRect(targetTagX, tagY, targetTagW, 20, 5);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(targetTagText, centerX, tagY + 10);
+        }
+
+        // 6. Stop Tag Header/Footer Pill (Floating Centered Pill)
+        if (showStats) {
+          const stopTagText = `Stop: ${slDiffStr} (${slPctStr}%) ${slTicks}, Amount: ${lossAmountStr}`;
+          ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+          const stopTextLen = ctx.measureText ? ctx.measureText(stopTagText).width : stopTagText.length * 6.5;
+          const stopTagW = Math.max(160, stopTextLen + 20);
+          const stopTagX = centerX - stopTagW / 2;
+          const stopTagY = isLong ? Math.max(entryY, slY) + 6 : topLossY - 26;
+
+          ctx.fillStyle = stopColor;
+          safeRoundRect(stopTagX, stopTagY, stopTagW, 20, 5);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(stopTagText, centerX, stopTagY + 10);
+        }
+
+        // 7. Center Summary Card (with White Border & Dynamic Outcome Fill)
+        if (showStats) {
+          const pnlVal = hasExplicitPnL
+            ? d.style.closedPnL!
+            : isClosedLoss
+              ? -slDiff
+              : tpDiff;
+          const pnlStr = pnlVal >= 0 ? pnlVal.toFixed(precision) : `-${Math.abs(pnlVal).toFixed(precision)}`;
+          const qtyStr = d.style.qty !== undefined
+            ? d.style.qty.toString()
+            : (lotSize >= 1 ? lotSize.toFixed(0) : lotSize.toFixed(2));
+          const cardBg = pnlVal >= 0 ? targetColor : stopColor;
+
           const isCompact = d.style.compactStats ?? false;
-          const cardW = isCompact ? 140 : 210;
-          const cardH = isCompact ? 28 : isMarginExceeded ? 58 : 46;
-          const cardX = (leftX + rightX) / 2 - cardW / 2;
+          const cardW = isCompact ? 160 : 200;
+          const cardH = isCompact ? 28 : isMarginExceeded ? 54 : 40;
+          const cardX = centerX - cardW / 2;
           const cardY = entryY - cardH / 2;
 
-          ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
-          ctx.strokeStyle = d.style.color || '#2962ff';
+          ctx.fillStyle = cardBg;
+          ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          if (typeof (ctx as any).roundRect === 'function') {
-            (ctx as any).roundRect(cardX, cardY, cardW, cardH, 6);
-          } else {
-            ctx.rect(cardX, cardY, cardW, cardH);
-          }
+          safeRoundRect(cardX, cardY, cardW, cardH, 6);
           ctx.fill();
           ctx.stroke();
 
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
           if (isCompact) {
-            ctx.fillStyle = isLong ? '#089981' : '#f23645';
-            ctx.font = 'bold 11px sans-serif';
-            ctx.fillText(`${isLong ? '🟢 LONG' : '🔴 SHORT'} R:R ${rrRatio}`, cardX + 8, cardY + 18);
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+            ctx.fillText(`Closed PnL: ${pnlStr} · R:R ${rrRatio}`, centerX, entryY);
           } else {
-            ctx.fillStyle = isLong ? '#089981' : '#f23645';
-            ctx.font = 'bold 11px sans-serif';
-            ctx.fillText(
-              `${isLong ? '🟢 LONG' : '🔴 SHORT'} · Risk/Reward: ${rrRatio}`,
-              cardX + 8,
-              cardY + 16,
-            );
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+            ctx.fillText(`Closed PnL: ${pnlStr}, Qty: ${qtyStr}`, centerX, cardY + 13);
 
-            ctx.fillStyle = '#d1d4dc';
-            ctx.font = '10px sans-serif';
-            ctx.fillText(
-              `Open: ${formatCrosshairPrice(entryPrice, d.symbol)} · Qty: ${lotSize.toFixed(2)} Lots ($${riskAmount.toFixed(0)})`,
-              cardX + 8,
-              cardY + 30,
-            );
-
-            ctx.fillStyle = '#787b86';
-            ctx.font = '9.5px sans-serif';
-            ctx.fillText(`${barCount} bars (${durText})`, cardX + 8, cardY + 42);
+            ctx.font = '500 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+            ctx.fillText(`Risk/reward ratio: ${rrRatio}`, centerX, cardY + 28);
 
             if (isMarginExceeded) {
-              ctx.fillStyle = '#ff9800';
-              ctx.font = 'bold 9px sans-serif';
-              ctx.fillText('⚠️ Margin Required > Equity', cardX + 8, cardY + 53);
+              ctx.fillStyle = '#fffb00';
+              ctx.font = 'bold 9.5px sans-serif';
+              ctx.fillText('⚠️ Margin Required > Equity', centerX, cardY + 44);
             }
           }
         }
+
+        // 8. Price Scale Axis Labels on Right Edge (when showPrices !== false)
+        if (d.style.showPrices !== false) {
+          const axisBadges = [
+            { price: tpPrice, y: tpY, color: targetColor },
+            { price: entryPrice, y: entryY, color: d.style.color || '#2962ff' },
+            { price: slPrice, y: slY, color: stopColor },
+          ];
+          for (const badge of axisBadges) {
+            const priceText = formatCrosshairPrice(badge.price, d.symbol);
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+            const textMetrics = ctx.measureText ? ctx.measureText(priceText) : { width: priceText.length * 6 };
+            const badgeW = textMetrics.width + 14;
+            const badgeH = 20;
+            const badgeX = Math.max(2, w - badgeW - 2);
+            const badgeY = Math.max(2, Math.min(h - badgeH - 2, badge.y - badgeH / 2));
+
+            ctx.fillStyle = badge.color;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            safeRoundRect(badgeX, badgeY, badgeW, badgeH, 3);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(priceText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+          }
+        }
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
       }
       break;
     }
@@ -1296,29 +1403,29 @@ export function renderDrawingOnCanvas(
   if (isSelected) {
     if (d.type === 'long_position' || d.type === 'short_position') {
       const metrics = calculatePositionMetrics(d.type, d.points, d.style);
-      const { leftX, rightX, midX, tpY, slY } = calculatePositionHandleCoords(
+      const { leftX, rightX, tpY, slY } = calculatePositionHandleCoords(
         p1,
         metrics,
         chartToPixel,
         d.points[0].timestamp,
       );
 
+      // TradingView 4 squarcle handles: Top-Left (TP), Mid-Left (Entry), Bottom-Left (SL), Mid-Right (Duration)
       const handles = [
-        { x: leftX, y: p1.y, color: '#2962ff', title: 'Entry Anchor' },
-        { x: midX, y: tpY, color: '#089981', title: 'Take Profit' },
-        { x: midX, y: slY, color: '#f23645', title: 'Stop Loss' },
-        { x: rightX, y: p1.y, color: '#00bcd4', title: 'Duration' },
-        { x: rightX, y: tpY, color: '#089981', title: 'Top Right' },
-        { x: rightX, y: slY, color: '#f23645', title: 'Bottom Right' },
+        { x: leftX, y: tpY, title: 'Take Profit' },
+        { x: leftX, y: p1.y, title: 'Entry Anchor' },
+        { x: leftX, y: slY, title: 'Stop Loss' },
+        { x: rightX, y: p1.y, title: 'Duration' },
       ];
 
+      const hSize = 8;
+      const hHalf = hSize / 2;
       for (const h of handles) {
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#131722';
+        ctx.strokeStyle = '#2962ff';
+        ctx.lineWidth = 2;
+        safeRoundRect(h.x - hHalf, h.y - hHalf, hSize, hSize, 2);
         ctx.fill();
-        ctx.strokeStyle = h.color;
-        ctx.lineWidth = 2.5;
         ctx.stroke();
       }
     } else if (d.type === 'rectangle' && d.points.length >= 2) {

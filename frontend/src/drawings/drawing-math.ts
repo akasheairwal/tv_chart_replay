@@ -411,7 +411,7 @@ export {
   evaluateForecastOutcome,
 } from './position-calculator';
 
-import type { PositionMetrics } from './position-calculator';
+import type { PositionMetrics, DetailedPositionMetrics } from './position-calculator';
 import { calculatePositionMetricsFromStyle } from './position-calculator';
 
 export function calculatePositionMetrics(
@@ -419,7 +419,7 @@ export function calculatePositionMetrics(
   points: { timestamp: number; price: number }[],
   style: import('./drawing-types').DrawingStyle,
   fallbackAccountBalance = 10000,
-): PositionMetrics {
+): DetailedPositionMetrics {
   return calculatePositionMetricsFromStyle(type, points, style, fallbackAccountBalance);
 }
 

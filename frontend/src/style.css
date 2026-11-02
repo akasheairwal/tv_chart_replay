@@ -3278,6 +3278,62 @@ body {
 .tv-modal-btn.trade:hover {
   background: #067764 !important;
 }
+
+.tv-modal-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--tv-border);
+  padding: 0 16px;
+  margin-bottom: 14px;
+}
+
+.tv-modal-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--tv-fg-muted);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tv-modal-tab:hover {
+  color: var(--tv-fg-bright);
+}
+
+.tv-modal-tab.active {
+  color: #2962ff;
+  border-bottom-color: #2962ff;
+}
+
+.pos-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pos-slider-row input[type="range"] {
+  flex: 1;
+  accent-color: #2962ff;
+  cursor: pointer;
+}
+
+.pos-slider-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--tv-fg-muted);
+  width: 36px;
+  text-align: right;
+}
+
+.pos-checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
 /* ===================================================================
    Tabular Numerics for High-Frequency Price, PnL & Order Inputs
    Eliminates visual jitter and layout shifts during fast market ticks

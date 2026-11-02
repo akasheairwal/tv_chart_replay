@@ -124,6 +124,16 @@ export interface DrawingStyle {
   alwaysShowStats?: boolean;
   targetColor?: string;
   stopColor?: string;
+  targetOpacity?: number;
+  stopOpacity?: number;
+  leverage?: number;
+  accountCurrency?: string;
+  lotPrecision?: number;
+  closedPnL?: number;
+  outcome?: 'win' | 'loss' | 'open';
+  qty?: number;
+  exitTimestamp?: number;
+  exitPrice?: number;
 }
 
 export interface DrawingDefinition {

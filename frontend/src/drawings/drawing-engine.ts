@@ -2441,10 +2441,10 @@ export class DrawingEngine implements IDrawingShortcutTarget {
 
       // Handle 0: Entry Anchor (left edge center)
       if (distanceToPoint(px, py, leftX, p1.y) <= 10) return 0;
-      // Handle 1: TP / Target (mid top)
-      if (distanceToPoint(px, py, midX, tpY) <= 10) return 1;
-      // Handle 2: SL / Stop (mid bottom)
-      if (distanceToPoint(px, py, midX, slY) <= 10) return 2;
+      // Handle 1: TP / Target (top-left or mid top)
+      if (distanceToPoint(px, py, leftX, tpY) <= 10 || distanceToPoint(px, py, midX, tpY) <= 10) return 1;
+      // Handle 2: SL / Stop (bottom-left or mid bottom)
+      if (distanceToPoint(px, py, leftX, slY) <= 10 || distanceToPoint(px, py, midX, slY) <= 10) return 2;
       // Handle 3: Duration / Width (right edge center)
       if (distanceToPoint(px, py, rightX, p1.y) <= 10) return 3;
       // Handle 4: Top Right Corner
