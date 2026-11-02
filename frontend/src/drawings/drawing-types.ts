@@ -161,7 +161,7 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
   {
     id: 'positions',
     name: 'Position & Risk/Reward',
-    iconKey: 'positions_cat',
+    iconKey: 'long_position',
     tools: [
       { type: 'long_position', name: 'Long Position', iconKey: 'long_position', description: 'Dynamic Long Risk:Reward tool with TP/SL handles, pips & lot sizing' },
       { type: 'short_position', name: 'Short Position', iconKey: 'short_position', description: 'Dynamic Short Risk:Reward tool with TP/SL handles, pips & lot sizing' },

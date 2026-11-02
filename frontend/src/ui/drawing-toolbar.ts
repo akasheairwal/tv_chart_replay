@@ -10,6 +10,7 @@ export class DrawingToolbar {
   private activeCategory = 'cursor';
   private activeTool: DrawingType = 'cursor';
   private categoryBtns = new Map<string, HTMLButtonElement>();
+  private categoryActiveTool = new Map<string, DrawingType>();
   private flyoutEl: HTMLElement | null = null;
   private openCategory: string | null = null;
 
@@ -18,6 +19,9 @@ export class DrawingToolbar {
     private readonly engine: DrawingEngine,
     private readonly onOpenDrawingList?: () => void,
   ) {
+    for (const cat of TOOL_CATEGORIES) {
+      this.categoryActiveTool.set(cat.id, cat.tools[0]?.type || (cat.id as DrawingType));
+    }
     this.render();
     this.wireGlobalEvents();
   }
@@ -30,21 +34,34 @@ export class DrawingToolbar {
     bar.className = 'drawing-toolbar';
 
     for (const cat of TOOL_CATEGORIES) {
+      const initialTool = this.categoryActiveTool.get(cat.id) || cat.tools[0]?.type || (cat.id as DrawingType);
+      const initialToolDef = cat.tools.find((t) => t.type === initialTool);
+      const iconKey = initialToolDef?.iconKey || cat.iconKey || cat.id;
+
       const btn = document.createElement('button');
       btn.className = `drawing-tool-btn cat-btn ${cat.id === this.activeCategory ? 'active' : ''}`;
-      btn.title = cat.name;
+      btn.title = initialToolDef?.name || cat.name;
       btn.innerHTML = `
-        <span class="tool-btn-icon">${getIcon(cat.iconKey || cat.id)}</span>
+        <span class="tool-btn-icon">${getIcon(iconKey)}</span>
         ${cat.tools.length > 1 ? '<span class="cat-expand-arrow"></span>' : ''}
       `;
 
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
+        const isArrow = !!(e.target as HTMLElement).closest?.('.cat-expand-arrow');
         if (cat.tools.length === 1) {
           this.selectTool(cat.id, cat.tools[0].type);
           this.closeFlyout();
-        } else {
+        } else if (isArrow) {
           this.toggleFlyout(cat, btn);
+        } else {
+          const currentTool = this.categoryActiveTool.get(cat.id) || cat.tools[0].type;
+          if (this.activeCategory === cat.id && this.activeTool === currentTool) {
+            this.toggleFlyout(cat, btn);
+          } else {
+            this.selectTool(cat.id, currentTool);
+            this.closeFlyout();
+          }
         }
       });
 
@@ -158,15 +175,42 @@ export class DrawingToolbar {
   private selectTool(categoryId: string, tool: DrawingType): void {
     this.activeCategory = categoryId;
     this.activeTool = tool;
+    this.categoryActiveTool.set(categoryId, tool);
     this.engine.setTool(tool);
+    this._updateCategoryButton(categoryId, tool);
     this._syncButtonStates(categoryId);
   }
 
   /** Called externally when the engine changes tool (e.g. after drawing commit). */
   syncTool(tool: DrawingType): void {
     this.activeTool = tool;
-    const categoryId = tool === 'cursor' ? 'cursor' : this.activeCategory;
+    const cat = this._findCategoryForTool(tool);
+    const categoryId = cat ? cat.id : (tool === 'cursor' ? 'cursor' : this.activeCategory);
+    if (cat) {
+      this.activeCategory = cat.id;
+      this.categoryActiveTool.set(cat.id, tool);
+      this._updateCategoryButton(cat.id, tool);
+    }
     this._syncButtonStates(tool === 'cursor' ? 'cursor' : categoryId);
+  }
+
+  private _findCategoryForTool(tool: DrawingType): ToolCategory | undefined {
+    return TOOL_CATEGORIES.find((c) => c.tools.some((t) => t.type === tool));
+  }
+
+  private _updateCategoryButton(categoryId: string, tool: DrawingType): void {
+    const btn = this.categoryBtns.get(categoryId);
+    if (!btn) return;
+    const cat = TOOL_CATEGORIES.find((c) => c.id === categoryId);
+    const toolDef = cat?.tools.find((t) => t.type === tool);
+    const iconKey = toolDef?.iconKey || tool;
+    const iconSpan = btn.querySelector?.('.tool-btn-icon');
+    if (iconSpan) {
+      iconSpan.innerHTML = getIcon(iconKey);
+    }
+    if (toolDef) {
+      btn.title = toolDef.name;
+    }
   }
 
   private _syncButtonStates(activeId: string): void {
