@@ -1,6 +1,6 @@
 import type { DrawingEngine } from '../drawings/drawing-engine';
 import type { DrawingDefinition, DrawingStyle, DrawingType } from '../drawings/drawing-types';
-import { calculatePositionMetrics } from '../drawings/drawing-math';
+import { calculatePositionMetrics, calculateFinancialPosition } from '../drawings/drawing-math';
 import { getIcon } from './icons';
 
 const COLOR_PRESETS = [
@@ -436,6 +436,39 @@ export class DrawingStyleEditor {
         this.executeTradeFromDrawing(d);
       });
 
+      // Real-time live updating of risk analytics card
+      const updateSummaryCard = () => {
+        if (!isPosition) return;
+        const accSize = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-acc-size')?.value || '10000');
+        const riskMode = (dialog.querySelector<HTMLSelectElement>('#inp-risk-mode')?.value || 'PERCENT') as 'PERCENT' | 'CASH';
+        const riskVal = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-risk-val')?.value || '1.0');
+        const entryPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-entry-price')?.value || d.points[0]?.price?.toString() || '1.0');
+        const tpPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-tp-price')?.value || (d.points[1]?.price ?? entryPx * 1.02).toString());
+        const slPx = parseFloat(dialog.querySelector<HTMLInputElement>('#inp-sl-price')?.value || (d.points[2]?.price ?? entryPx * 0.99).toString());
+
+        const liveMetrics = calculateFinancialPosition({
+          type: d.type as 'long_position' | 'short_position',
+          entryPrice: entryPx,
+          tpPrice: tpPx,
+          slPrice: slPx,
+          accountSize: accSize,
+          riskMode,
+          riskPercent: riskMode === 'PERCENT' ? riskVal : undefined,
+          riskAmount: riskMode === 'CASH' ? riskVal : undefined,
+          symbol: d.symbol,
+        });
+
+        const cardLots = dialog.querySelector('#card-lots');
+        const cardRr = dialog.querySelector('#card-rr');
+        const cardRisk = dialog.querySelector('#card-risk');
+        const cardProfit = dialog.querySelector('#card-profit');
+
+        if (cardLots) cardLots.textContent = `${liveMetrics.lotSize.toFixed(2)} Lots`;
+        if (cardRr) cardRr.textContent = `1 : ${liveMetrics.rrRatio}`;
+        if (cardRisk) cardRisk.textContent = `-$${liveMetrics.lossDollar.toFixed(2)} (-${liveMetrics.slPips.toFixed(1)} pips)`;
+        if (cardProfit) cardProfit.textContent = `+$${liveMetrics.profitDollar.toFixed(2)} (+${liveMetrics.tpPips.toFixed(1)} pips)`;
+      };
+
       // Risk mode toggle update
       const modeSelect = dialog.querySelector<HTMLSelectElement>('#inp-risk-mode');
       const valLabel = dialog.querySelector('#inp-risk-val-label');
@@ -443,7 +476,23 @@ export class DrawingStyleEditor {
         modeSelect.addEventListener('change', () => {
           valLabel.textContent =
             modeSelect.value === 'CASH' ? 'Risk Amount ($):' : 'Risk Percentage (%):';
+          updateSummaryCard();
         });
+      }
+
+      if (isPosition && activeTab === 'inputs') {
+        const inputIds = [
+          '#inp-acc-size',
+          '#inp-risk-val',
+          '#inp-entry-price',
+          '#inp-tp-price',
+          '#inp-sl-price',
+        ];
+        for (const id of inputIds) {
+          const inputEl = dialog.querySelector(id);
+          inputEl?.addEventListener('input', updateSummaryCard);
+          inputEl?.addEventListener('change', updateSummaryCard);
+        }
       }
 
       // Save Handler

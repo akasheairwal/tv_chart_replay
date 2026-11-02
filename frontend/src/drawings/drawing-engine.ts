@@ -12,10 +12,11 @@ import {
   distanceToPoint,
   distanceToRay,
   distanceToSegment,
-  findNearestCandleOHLC,
+  snapToCandleOHLC,
   formatDuration,
   formatVolume,
   getPipSize,
+  solveToolHandleConstraint,
   GANN_FAN_RATIOS,
   isPointInEllipse,
   isPointInPolygon,
@@ -32,11 +33,13 @@ import {
 } from './drawing-renderers';
 import {
   getRequiredPointCount,
+  getToolBehavior,
   type DrawingDefinition,
   type DrawingPoint,
   type DrawingStyle,
   type DrawingType,
   type DrawingInteractionState,
+  type MagnetMode,
 } from './drawing-types';
 import type { SlTpModificationRequest } from '../ui/sl-tp-confirm-dialog';
 import type { PositionDefinition } from '../trading/trading-types';
@@ -111,7 +114,8 @@ export class DrawingEngine implements IDrawingShortcutTarget {
   private selectedDrawingIds: Set<string> = new Set();
   private originalMultiPoints: Map<string, DrawingPoint[]> = new Map();
   private isHiddenAllDrawings = false;
-  private isMagnetModeEnabled = false;
+  private magnetMode: MagnetMode = 'off';
+  private isModPressed = false;
   private clipboard: DrawingDefinition[] = [];
   private undoStack: string[] = [];
   private redoStack: string[] = [];
@@ -159,20 +163,32 @@ export class DrawingEngine implements IDrawingShortcutTarget {
   private onContainerTouchStart = (e: TouchEvent): void => this.handleContainerTouchStart(e);
   private onContainerTouchMove = (e: TouchEvent): void => this.handleContainerTouchMove(e);
   private onWindowKeyDownShift = (e: KeyboardEvent): void => {
+    let reprocess = false;
     if (e.key === 'Shift' && !this.isShiftPressed) {
       this.isShiftPressed = true;
-      if (this.lastPointerPos) {
-        this.reprocessPointerPosition(this.lastPointerPos);
-      }
+      reprocess = true;
+    }
+    if ((e.key === 'Control' || e.key === 'Meta') && !this.isModPressed) {
+      this.isModPressed = true;
+      reprocess = true;
+    }
+    if (reprocess && this.lastPointerPos) {
+      this.reprocessPointerPosition(this.lastPointerPos);
     }
     this.onKeyDown(e);
   };
   private onWindowKeyUpShift = (e: KeyboardEvent): void => {
+    let reprocess = false;
     if (e.key === 'Shift' && this.isShiftPressed) {
       this.isShiftPressed = false;
-      if (this.lastPointerPos) {
-        this.reprocessPointerPosition(this.lastPointerPos);
-      }
+      reprocess = true;
+    }
+    if ((e.key === 'Control' || e.key === 'Meta') && this.isModPressed) {
+      this.isModPressed = false;
+      reprocess = true;
+    }
+    if (reprocess && this.lastPointerPos) {
+      this.reprocessPointerPosition(this.lastPointerPos);
     }
   };
   private onWheelCapture = (e: WheelEvent): void => {
@@ -505,17 +521,37 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     this.redraw();
   }
 
-  setMagnetMode(enabled: boolean): void {
-    this.isMagnetModeEnabled = enabled;
+  setMagnetMode(mode: MagnetMode | boolean): void {
+    if (typeof mode === 'boolean') {
+      this.magnetMode = mode ? 'weak' : 'off';
+    } else {
+      this.magnetMode = mode;
+    }
+    if (this.lastPointerPos) {
+      this.reprocessPointerPosition(this.lastPointerPos);
+    }
+  }
+
+  getMagnetMode(): MagnetMode {
+    return this.magnetMode;
   }
 
   isMagnetMode(): boolean {
-    return this.isMagnetModeEnabled;
+    return this.magnetMode !== 'off';
   }
 
-  toggleMagnetMode(): boolean {
-    this.isMagnetModeEnabled = !this.isMagnetModeEnabled;
-    return this.isMagnetModeEnabled;
+  toggleMagnetMode(): MagnetMode {
+    if (this.magnetMode === 'off') {
+      this.magnetMode = 'weak';
+    } else if (this.magnetMode === 'weak') {
+      this.magnetMode = 'strong';
+    } else {
+      this.magnetMode = 'off';
+    }
+    if (this.lastPointerPos) {
+      this.reprocessPointerPosition(this.lastPointerPos);
+    }
+    return this.magnetMode;
   }
 
   copySelected(): boolean {
@@ -736,8 +772,12 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     }
   }
 
+  private get dpr(): number {
+    return typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+  }
+
   resize(): void {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.dpr;
     const w = this.container.clientWidth || 800;
     const h = this.container.clientHeight || 500;
     this.canvas.width = w * dpr;
@@ -753,8 +793,8 @@ export class DrawingEngine implements IDrawingShortcutTarget {
   // -- Coordinate Conversion ----------------------------------------
 
   chartToPixel(point: DrawingPoint): { x: number; y: number } | null {
-    const w = this.canvas.width / (window.devicePixelRatio || 1);
-    const h = this.canvas.height / (window.devicePixelRatio || 1);
+    const w = this.canvas.width / this.dpr;
+    const h = this.canvas.height / this.dpr;
 
     // 1. Price -> Y coordinate
     let y: number | null = this.series?.priceToCoordinate?.(point.price) ?? null;
@@ -940,7 +980,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
   }
 
   pixelToChart(x: number, y: number): DrawingPoint | null {
-    const h = this.canvas.height / (window.devicePixelRatio || 1);
+    const h = this.canvas.height / this.dpr;
 
     let price: number | null = this.series?.coordinateToPrice?.(y) ?? null;
 
@@ -1169,16 +1209,31 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       }
     }
 
-    const shouldMagnet = this.isMagnetModeEnabled !== Boolean(modPressed);
-    if (shouldMagnet && this.candleData.length > 0) {
-      const chartPos = this.pixelToChart(result.x, result.y);
-      if (chartPos) {
-        const snapped = findNearestCandleOHLC(chartPos, this.candleData);
-        if (snapped) {
-          const snappedPix = this.chartToPixel(snapped);
-          if (snappedPix) {
-            result = snappedPix;
-          }
+    const activeTool =
+      this.interactionState === 'EDITING_HANDLE' && this.selectedDrawingId
+        ? (this.drawings.find((d) => d.id === this.selectedDrawingId)?.type || this.currentTool)
+        : this.currentTool;
+
+    const behavior = getToolBehavior(activeTool);
+    if (behavior.allowMagnet !== false && this.candleData.length > 0) {
+      let effectiveMode: 'off' | 'weak' | 'strong' = 'off';
+
+      if (this.magnetMode === 'off') {
+        effectiveMode = modPressed ? 'weak' : 'off';
+      } else {
+        effectiveMode = modPressed ? 'off' : this.magnetMode;
+      }
+
+      if (effectiveMode !== 'off') {
+        const snapRes = snapToCandleOHLC(
+          result,
+          this.candleData,
+          effectiveMode,
+          (pt) => this.chartToPixel(pt),
+          (x, y) => this.pixelToChart(x, y),
+        );
+        if (snapRes.snapped && snapRes.pixelPoint) {
+          result = snapRes.pixelPoint;
         }
       }
     }
@@ -1187,7 +1242,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
   }
 
   private reprocessPointerPosition(rawPos: { x: number; y: number }): void {
-    const pos = this.getEffectivePointerPos(rawPos, this.isShiftPressed);
+    const pos = this.getEffectivePointerPos(rawPos, this.isShiftPressed, this.isModPressed);
 
     if (this.interactionState === 'DRAWING' && this.draftPoints.length > 0) {
       const chartPos = this.pixelToChart(pos.x, pos.y);
@@ -1262,8 +1317,10 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       }
     }
 
-    window.addEventListener('keydown', this.onWindowKeyDownShift);
-    window.addEventListener('keyup', this.onWindowKeyUpShift);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', this.onWindowKeyDownShift);
+      window.addEventListener('keyup', this.onWindowKeyUpShift);
+    }
   }
 
   private handleDblClick(e: MouseEvent): void {
@@ -1376,8 +1433,8 @@ export class DrawingEngine implements IDrawingShortcutTarget {
 
     const renderCtx: RenderContext = {
       ctx: this.ctx as CanvasRenderingContext2D,
-      canvasWidth: this.canvas.width / (window.devicePixelRatio || 1),
-      canvasHeight: this.canvas.height / (window.devicePixelRatio || 1),
+      canvasWidth: this.canvas.width / this.dpr,
+      canvasHeight: this.canvas.height / this.dpr,
       chartToPixel: (pt) => this.chartToPixel(pt),
       pixelToChart: (x, y) => this.pixelToChart(x, y),
     };
@@ -1530,8 +1587,13 @@ export class DrawingEngine implements IDrawingShortcutTarget {
 
   private onToolPointerDown(e: PointerEvent, rawPos: { x: number; y: number }): void {
     this.isShiftPressed = e.shiftKey;
+    const isMac =
+      typeof navigator !== 'undefined' &&
+      /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    const modKey = isMac ? e.metaKey : e.ctrlKey;
+    this.isModPressed = modKey;
     this.lastPointerPos = rawPos;
-    const pos = this.getEffectivePointerPos(rawPos, e.shiftKey);
+    const pos = this.getEffectivePointerPos(rawPos, e.shiftKey, modKey);
 
     this.pointerDownPos = pos;
     this.pointerDragDist = 0;
@@ -1751,8 +1813,8 @@ export class DrawingEngine implements IDrawingShortcutTarget {
 
     const renderCtx: RenderContext = {
       ctx: this.ctx as CanvasRenderingContext2D,
-      canvasWidth: this.canvas.width / (window.devicePixelRatio || 1),
-      canvasHeight: this.canvas.height / (window.devicePixelRatio || 1),
+      canvasWidth: this.canvas.width / this.dpr,
+      canvasHeight: this.canvas.height / this.dpr,
       chartToPixel: (pt) => this.chartToPixel(pt),
       pixelToChart: (x, y) => this.pixelToChart(x, y),
     };
@@ -1902,7 +1964,18 @@ export class DrawingEngine implements IDrawingShortcutTarget {
           );
         }
       } else {
-        selected.points[this.activeHandleIndex] = chartPos;
+        const solved = solveToolHandleConstraint(
+          selected.type,
+          this.activeHandleIndex,
+          chartPos,
+          selected.points,
+          selected.style,
+          { isShiftPressed: this.isShiftPressed },
+        );
+        selected.points = solved.updatedPoints;
+        if (solved.updatedStyle) {
+          selected.style = { ...selected.style, ...solved.updatedStyle };
+        }
       }
       this.redraw();
       return;
@@ -1979,7 +2052,11 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       this.pointerDragDist > 20
     ) {
       const rawPos = this.getCanvasPos(e);
-      const effPos = this.getEffectivePointerPos(rawPos, e.shiftKey);
+      const isMac =
+        typeof navigator !== 'undefined' &&
+        /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+      const modKey = isMac ? e.metaKey : e.ctrlKey;
+      const effPos = this.getEffectivePointerPos(rawPos, e.shiftKey, modKey);
       const chartPos = this.pixelToChart(effPos.x, effPos.y);
       if (chartPos) {
         this.draftPoints[1] = chartPos;
@@ -2426,8 +2503,8 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       this.redrawRafId = null;
     }
     if (!this.ctx) return; // headless/test environments without 2d context
-    const w = this.canvas.width / (window.devicePixelRatio || 1);
-    const h = this.canvas.height / (window.devicePixelRatio || 1);
+    const w = this.canvas.width / this.dpr;
+    const h = this.canvas.height / this.dpr;
     this.ctx.clearRect(0, 0, w, h);
 
     const rc: RenderContext = {
@@ -2479,8 +2556,10 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       cancelAnimationFrame(this.redrawRafId);
       this.redrawRafId = null;
     }
-    window.removeEventListener('keydown', this.onWindowKeyDownShift);
-    window.removeEventListener('keyup', this.onWindowKeyUpShift);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this.onWindowKeyDownShift);
+      window.removeEventListener('keyup', this.onWindowKeyUpShift);
+    }
     this.container.removeEventListener('pointerdown', this.onContainerPointerDown, true);
     this.container.removeEventListener('pointermove', this.onContainerPointerMove, true);
     this.container.removeEventListener('pointerup', this.onContainerPointerUp, true);

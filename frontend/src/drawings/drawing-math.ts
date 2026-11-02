@@ -1,4 +1,12 @@
 import type { CompactCandleRow } from '../chart/candle-series';
+import type {
+  DrawingPoint,
+  DrawingStyle,
+  DrawingType,
+  HandleRole,
+  HandleCursor,
+} from './drawing-types';
+
 export function distanceToPoint(px: number, py: number, x: number, y: number): number {
   const dx = px - x;
   const dy = py - y;
@@ -244,7 +252,7 @@ export function calculatePitchfork(
   p1: { x: number; y: number },
   p2: { x: number; y: number },
   p3: { x: number; y: number },
-  variant: 'standard' | 'schiff' | 'modified_schiff' | boolean = 'standard',
+  variant: 'standard' | 'schiff' | 'modified_schiff' | 'inside' | boolean = 'standard',
   extent = 2000,
 ): PitchforkGeometry {
   let origin = { x: p1.x, y: p1.y };
@@ -252,9 +260,14 @@ export function calculatePitchfork(
     origin = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
   } else if (variant === 'modified_schiff') {
     origin = { x: p1.x, y: (p1.y + p2.y) / 2 };
+  } else if (variant === 'inside') {
+    origin = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
   }
 
-  const midpoint = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
+  const midpoint =
+    variant === 'inside'
+      ? { x: p3.x, y: p3.y }
+      : { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
   const dx = midpoint.x - origin.x;
   const dy = midpoint.y - origin.y;
   const len = Math.sqrt(dx * dx + dy * dy);
@@ -376,27 +389,30 @@ export function formatCrosshairTime(timestamp: number, timeframe = '1H'): string
   return `${day} ${mon} '${yr}  ${hrs}:${mins}`;
 }
 
-export interface PositionMetrics {
-  isLong: boolean;
-  entryPrice: number;
-  tpPrice: number;
-  slPrice: number;
-  tpDistance: number;
-  slDistance: number;
-  pipSize: number;
-  tpPips: number;
-  slPips: number;
-  tpPct: number;
-  slPct: number;
-  rrRatio: string;
-  accountSize: number;
-  riskPercent: number;
-  riskAmount: number;
-  lotSize: number;
-  profitDollar: number;
-  lossDollar: number;
-  endTimestamp: number;
-}
+export type {
+  PositionMetrics,
+  DetailedPositionMetrics,
+  PositionRiskMode,
+  SymbolSpec,
+  PositionCalculationInput,
+  RangeMetrics,
+  ForecastStatus,
+  ForecastEvaluationResult,
+} from './position-calculator';
+
+export {
+  detectSymbolSpec,
+  calculateFinancialPosition,
+  calculatePositionMetricsFromStyle,
+  solveTargetForRiskReward,
+  solveStopForRiskReward,
+  solveLotSizeForRisk,
+  calculateRangeMetrics,
+  evaluateForecastOutcome,
+} from './position-calculator';
+
+import type { PositionMetrics } from './position-calculator';
+import { calculatePositionMetricsFromStyle } from './position-calculator';
 
 export function calculatePositionMetrics(
   type: 'long_position' | 'short_position',
@@ -404,101 +420,7 @@ export function calculatePositionMetrics(
   style: import('./drawing-types').DrawingStyle,
   fallbackAccountBalance = 10000,
 ): PositionMetrics {
-  const isLong = type === 'long_position';
-  const entryPrice = points[0]?.price ?? 1.0;
-
-  const pipSize = getPipSize(entryPrice);
-  const defaultDelta = entryPrice > 50 ? 0.4 : 0.004;
-  const minGap = pipSize * 0.5;
-
-  let tpPrice = points[1]?.price;
-  if (tpPrice === undefined || tpPrice === null) {
-    tpPrice = isLong ? entryPrice + defaultDelta : entryPrice - defaultDelta;
-  } else {
-    tpPrice = isLong
-      ? Math.max(entryPrice + minGap, tpPrice)
-      : Math.min(entryPrice - minGap, tpPrice);
-  }
-
-  let slPrice = points[2]?.price;
-  if (slPrice === undefined || slPrice === null) {
-    slPrice = isLong
-      ? entryPrice - Math.abs(tpPrice - entryPrice) / 2
-      : entryPrice + Math.abs(entryPrice - tpPrice) / 2;
-  } else {
-    slPrice = isLong
-      ? Math.min(entryPrice - minGap, slPrice)
-      : Math.max(entryPrice + minGap, slPrice);
-  }
-
-  const endTimestamp =
-    points[3]?.timestamp ?? (points[1]?.timestamp || (points[0]?.timestamp ?? Date.now() / 1000) + 3600 * 20);
-
-  const tpDistance = Math.abs(tpPrice - entryPrice);
-  const slDistance = Math.abs(entryPrice - slPrice);
-
-  const tpPips = tpDistance / pipSize;
-  const slPips = slDistance / pipSize;
-
-  const tpPct = entryPrice > 0 ? (tpDistance / entryPrice) * 100 : 0;
-  const slPct = entryPrice > 0 ? (slDistance / entryPrice) * 100 : 0;
-
-  const rrValue = slDistance > 0 ? tpDistance / slDistance : 1.0;
-  const rrRatio = rrValue.toFixed(2);
-
-  const accountSize = style.accountSize || fallbackAccountBalance;
-  const riskMode = style.riskMode || 'PERCENT';
-
-  let riskAmount = 100;
-  let riskPercent = 1.0;
-
-  if (riskMode === 'CASH' && style.riskAmount && style.riskAmount > 0) {
-    riskAmount = style.riskAmount;
-    riskPercent = accountSize > 0 ? (riskAmount / accountSize) * 100 : 1.0;
-  } else {
-    riskPercent = style.riskPercent || 1.0;
-    riskAmount = accountSize * (riskPercent / 100);
-  }
-
-  let pipValuePerLot = 10;
-  if (entryPrice > 1000) {
-    pipValuePerLot = 1;
-  } else if (entryPrice > 50) {
-    pipValuePerLot = 1000 * pipSize;
-  } else {
-    pipValuePerLot = 100000 * pipSize;
-  }
-
-  let lotSize = style.lotSize || 1.0;
-  if (slPips > 0 && pipValuePerLot > 0) {
-    const calculatedLots = riskAmount / (slPips * pipValuePerLot);
-    lotSize = Math.max(0.01, Math.round(calculatedLots * 100) / 100);
-  }
-
-  const lossDollar = slPips * (lotSize * pipValuePerLot);
-  const profitDollar = tpPips * (lotSize * pipValuePerLot);
-
-  return {
-    isLong,
-    entryPrice,
-    tpPrice,
-    slPrice,
-    tpDistance,
-    slDistance,
-    pipSize,
-    tpPips,
-    slPips,
-    tpPct,
-    slPct,
-    rrRatio,
-    accountSize,
-    riskPercent,
-    riskAmount,
-    lotSize,
-    profitDollar,
-    lossDollar,
-    endTimestamp,
-  };
+  return calculatePositionMetricsFromStyle(type, points, style, fallbackAccountBalance);
 }
 
 export function smoothFreehandPoints(
@@ -650,47 +572,204 @@ export function constrainCircle(
   return constrainSquare(current, anchor);
 }
 
-export function findNearestCandleOHLC(
-  target: { timestamp: number; price: number },
-  candles: CompactCandleRow[],
-): { timestamp: number; price: number } | null {
-  if (!candles || candles.length === 0) return null;
+export interface CandleSnapResult {
+  snapped: boolean;
+  point: DrawingPoint;
+  pixelPoint?: { x: number; y: number };
+  level?: 'open' | 'high' | 'low' | 'close';
+  candle?: CompactCandleRow;
+  distancePx?: number;
+}
 
+/**
+ * Binary search to locate the index of the candle with the closest timestamp.
+ */
+export function findNearestCandleIndex(
+  timestamp: number,
+  candles: CompactCandleRow[],
+): number {
+  if (!candles || candles.length === 0) return -1;
   let low = 0;
   let high = candles.length - 1;
 
   while (low <= high) {
     const mid = (low + high) >> 1;
-    const midTime = candles[mid][0];
-    if (midTime === target.timestamp) {
-      low = mid;
-      break;
-    } else if (midTime < target.timestamp) {
+    if (candles[mid][0] === timestamp) {
+      return mid;
+    } else if (candles[mid][0] < timestamp) {
       low = mid + 1;
     } else {
       high = mid - 1;
     }
   }
 
-  const candidates: number[] = [];
-  for (let i = Math.max(0, low - 2); i <= Math.min(candles.length - 1, low + 2); i++) {
-    candidates.push(i);
+  const prevIdx = Math.max(0, low - 1);
+  const nextIdx = Math.min(candles.length - 1, low);
+  const diffPrev = Math.abs(candles[prevIdx][0] - timestamp);
+  const diffNext = Math.abs(candles[nextIdx][0] - timestamp);
+  return diffPrev <= diffNext ? prevIdx : nextIdx;
+}
+
+/**
+ * Spatial Candle Magnet Snapping Algorithm (ADR 0004 - Phase 3).
+ *
+ * Implements Weak Magnet (screenspace Euclidean proximity <= 15px within 25px horizontal window)
+ * and Strong Magnet (unconditional nearest candle column snap to closest OHLC level).
+ */
+export function snapToCandleOHLC(
+  screenPos: { x: number; y: number },
+  candles: CompactCandleRow[],
+  mode: 'weak' | 'strong',
+  chartToPixel: (pt: DrawingPoint) => { x: number; y: number } | null,
+  pixelToChart: (x: number, y: number) => DrawingPoint | null,
+  options?: {
+    weakProximityX?: number;
+    weakSnapDistance?: number;
+  },
+): CandleSnapResult {
+  const chartPt = pixelToChart(screenPos.x, screenPos.y);
+  if (!chartPt || !candles || candles.length === 0) {
+    return {
+      snapped: false,
+      point: chartPt || { timestamp: 0, price: 0 },
+      pixelPoint: screenPos,
+    };
   }
 
-  if (candidates.length === 0) return null;
+  const centerIdx = findNearestCandleIndex(chartPt.timestamp, candles);
+  if (centerIdx < 0) {
+    return { snapped: false, point: chartPt, pixelPoint: screenPos };
+  }
 
-  let bestCandle = candles[candidates[0]];
-  let minTimeDist = Math.abs(bestCandle[0] - target.timestamp);
+  const startIdx = Math.max(0, centerIdx - 15);
+  const endIdx = Math.min(candles.length - 1, centerIdx + 15);
 
-  for (const idx of candidates) {
-    const c = candles[idx];
-    const dist = Math.abs(c[0] - target.timestamp);
-    if (dist < minTimeDist) {
-      minTimeDist = dist;
-      bestCandle = c;
+  const weakProximityX = options?.weakProximityX ?? 25;
+  const weakSnapDistance = options?.weakSnapDistance ?? 15;
+
+  if (mode === 'strong') {
+    let bestCandle = candles[centerIdx];
+    let minDx = Infinity;
+
+    for (let i = startIdx; i <= endIdx; i++) {
+      const c = candles[i];
+      const candlePix = chartToPixel({ timestamp: c[0], price: c[1] });
+      if (!candlePix) continue;
+      const dx = Math.abs(screenPos.x - candlePix.x);
+      if (dx < minDx) {
+        minDx = dx;
+        bestCandle = c;
+      }
+    }
+
+    const [, o, h, l, c] = bestCandle;
+    const levels: { level: 'open' | 'high' | 'low' | 'close'; price: number }[] = [
+      { level: 'open', price: o },
+      { level: 'high', price: h },
+      { level: 'low', price: l },
+      { level: 'close', price: c },
+    ];
+
+    let bestLevel = levels[0];
+    let minDy = Infinity;
+
+    for (const lvl of levels) {
+      const lvlPix = chartToPixel({ timestamp: bestCandle[0], price: lvl.price });
+      const dy = lvlPix ? Math.abs(screenPos.y - lvlPix.y) : Math.abs(chartPt.price - lvl.price);
+      if (dy < minDy) {
+        minDy = dy;
+        bestLevel = lvl;
+      }
+    }
+
+    const snappedPoint: DrawingPoint = {
+      timestamp: bestCandle[0],
+      price: bestLevel.price,
+    };
+    const pixelPoint = chartToPixel(snappedPoint) || screenPos;
+
+    return {
+      snapped: true,
+      point: snappedPoint,
+      pixelPoint,
+      level: bestLevel.level,
+      candle: bestCandle,
+      distancePx: Math.hypot(minDx, minDy),
+    };
+  }
+
+  // Weak Magnet
+  let bestCandidate: {
+    candle: CompactCandleRow;
+    level: 'open' | 'high' | 'low' | 'close';
+    price: number;
+    pixelPoint: { x: number; y: number };
+    distance: number;
+  } | null = null;
+  let minDistance = Infinity;
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    const c = candles[i];
+    const candlePix = chartToPixel({ timestamp: c[0], price: c[1] });
+    if (!candlePix) continue;
+
+    const dx = Math.abs(screenPos.x - candlePix.x);
+    if (dx > weakProximityX) continue;
+
+    const [, o, h, l, close] = c;
+    const levels: { level: 'open' | 'high' | 'low' | 'close'; price: number }[] = [
+      { level: 'open', price: o },
+      { level: 'high', price: h },
+      { level: 'low', price: l },
+      { level: 'close', price: close },
+    ];
+
+    for (const lvl of levels) {
+      const lvlPix = chartToPixel({ timestamp: c[0], price: lvl.price });
+      if (!lvlPix) continue;
+
+      const dist = Math.hypot(screenPos.x - lvlPix.x, screenPos.y - lvlPix.y);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestCandidate = {
+          candle: c,
+          level: lvl.level,
+          price: lvl.price,
+          pixelPoint: lvlPix,
+          distance: dist,
+        };
+      }
     }
   }
 
+  if (bestCandidate && minDistance <= weakSnapDistance) {
+    return {
+      snapped: true,
+      point: { timestamp: bestCandidate.candle[0], price: bestCandidate.price },
+      pixelPoint: bestCandidate.pixelPoint,
+      level: bestCandidate.level,
+      candle: bestCandidate.candle,
+      distancePx: minDistance,
+    };
+  }
+
+  return {
+    snapped: false,
+    point: chartPt,
+    pixelPoint: screenPos,
+    distancePx: minDistance,
+  };
+}
+
+export function findNearestCandleOHLC(
+  target: { timestamp: number; price: number },
+  candles: CompactCandleRow[],
+): { timestamp: number; price: number } | null {
+  if (!candles || candles.length === 0) return null;
+  const idx = findNearestCandleIndex(target.timestamp, candles);
+  if (idx < 0) return null;
+
+  const bestCandle = candles[idx];
   const [, open, highPrice, lowPrice, close] = bestCandle;
   const ohlc = [open, highPrice, lowPrice, close];
 
@@ -710,3 +789,467 @@ export function findNearestCandleOHLC(
     price: nearestPrice,
   };
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0004 - Phase 2: Topological Constraint Engine
+// ---------------------------------------------------------------------------
+
+/**
+ * Geometric structure of a Parallel Channel in logical time/price coordinates.
+ */
+export interface LogicalParallelChannelGeometry {
+  p1: DrawingPoint; // Baseline start
+  p2: DrawingPoint; // Baseline end
+  p3: DrawingPoint; // Offset start
+  p4: DrawingPoint; // Offset end
+  medianStart: DrawingPoint;
+  medianEnd: DrawingPoint;
+}
+
+/**
+ * Calculates all 4 corners and median line of a parallel channel in logical coordinates.
+ */
+export function calculateLogicalParallelChannel(
+  p1: DrawingPoint,
+  p2: DrawingPoint,
+  p3: DrawingPoint,
+): LogicalParallelChannelGeometry {
+  const dt = p3.timestamp - p1.timestamp;
+  const dp = p3.price - p1.price;
+  const p4: DrawingPoint = {
+    timestamp: p2.timestamp + dt,
+    price: p2.price + dp,
+  };
+  const medianStart: DrawingPoint = {
+    timestamp: (p1.timestamp + p3.timestamp) / 2,
+    price: (p1.price + p3.price) / 2,
+  };
+  const medianEnd: DrawingPoint = {
+    timestamp: (p2.timestamp + p4.timestamp) / 2,
+    price: (p2.price + p4.price) / 2,
+  };
+  return { p1, p2, p3, p4, medianStart, medianEnd };
+}
+
+/**
+ * Solves topological constraints for Parallel Channel handle dragging.
+ * Preserves channel width and baseline parallelism.
+ */
+export function solveParallelChannelConstraint(
+  handleIndex: number,
+  draggedPoint: DrawingPoint,
+  currentPoints: DrawingPoint[],
+): DrawingPoint[] {
+  if (currentPoints.length < 3) {
+    const pts = [...currentPoints];
+    if (handleIndex >= 0 && handleIndex < pts.length) {
+      pts[handleIndex] = { ...draggedPoint };
+    }
+    return pts;
+  }
+
+  const p1 = currentPoints[0];
+  const p2 = currentPoints[1];
+  const p3 = currentPoints[2];
+
+  if (handleIndex === 2) {
+    // Dragging channel width/offset handle: modifies only p3
+    return [p1, p2, { ...draggedPoint }];
+  }
+
+  if (handleIndex === 0) {
+    // Dragging baseline start p1: translates p3 along with baseline displacement to preserve offset
+    const dt = draggedPoint.timestamp - p1.timestamp;
+    const dp = draggedPoint.price - p1.price;
+    const newP3: DrawingPoint = {
+      timestamp: p3.timestamp + dt,
+      price: p3.price + dp,
+    };
+    return [{ ...draggedPoint }, p2, newP3];
+  }
+
+  if (handleIndex === 1) {
+    // Dragging baseline end p2: translates p3 along with baseline displacement
+    const dt = draggedPoint.timestamp - p2.timestamp;
+    const dp = draggedPoint.price - p2.price;
+    const newP3: DrawingPoint = {
+      timestamp: p3.timestamp + dt,
+      price: p3.price + dp,
+    };
+    return [p1, { ...draggedPoint }, newP3];
+  }
+
+  // Handle translation of all points (e.g. midpoint handle)
+  const dt = draggedPoint.timestamp - p1.timestamp;
+  const dp = draggedPoint.price - p1.price;
+  return currentPoints.map((pt) => ({
+    timestamp: pt.timestamp + dt,
+    price: pt.price + dp,
+  }));
+}
+
+/**
+ * Pitchfork geometry calculated in logical time/price space.
+ */
+export interface LogicalPitchforkGeometry {
+  origin: DrawingPoint;
+  midpoint: DrawingPoint;
+  medianVector: { dt: number; dp: number };
+}
+
+/**
+ * Computes logical pitchfork origin, midpoint, and directional vector
+ * supporting Standard (Andrews), Schiff, Modified Schiff, and Inside Pitchfork variants.
+ */
+export function calculateLogicalPitchfork(
+  p1: DrawingPoint,
+  p2: DrawingPoint,
+  p3: DrawingPoint,
+  variant: 'standard' | 'schiff' | 'modified_schiff' | 'inside' = 'standard',
+): LogicalPitchforkGeometry {
+  let origin: DrawingPoint = { ...p1 };
+
+  if (variant === 'schiff') {
+    // Origin shifted halfway in price between P1 and P2
+    origin = {
+      timestamp: p1.timestamp,
+      price: p1.price + (p2.price - p1.price) / 2,
+    };
+  } else if (variant === 'modified_schiff') {
+    // Origin shifted halfway in time between P1 and P2
+    origin = {
+      timestamp: p1.timestamp + (p2.timestamp - p1.timestamp) / 2,
+      price: p1.price,
+    };
+  } else if (variant === 'inside') {
+    // Origin at midpoint of P1 and P2
+    origin = {
+      timestamp: (p1.timestamp + p2.timestamp) / 2,
+      price: (p1.price + p2.price) / 2,
+    };
+  }
+
+  const midpoint: DrawingPoint =
+    variant === 'inside'
+      ? { ...p3 }
+      : {
+          timestamp: (p2.timestamp + p3.timestamp) / 2,
+          price: (p2.price + p3.price) / 2,
+        };
+
+  return {
+    origin,
+    midpoint,
+    medianVector: {
+      dt: midpoint.timestamp - origin.timestamp,
+      dp: midpoint.price - origin.price,
+    },
+  };
+}
+
+/**
+ * Solves topological constraints for Pitchfork handle dragging.
+ */
+export function solvePitchforkConstraint(
+  handleIndex: number,
+  draggedPoint: DrawingPoint,
+  currentPoints: DrawingPoint[],
+  _variant: 'standard' | 'schiff' | 'modified_schiff' | 'inside' = 'standard',
+): DrawingPoint[] {
+  const pts = [...currentPoints];
+  if (handleIndex >= 0 && handleIndex < pts.length) {
+    pts[handleIndex] = { ...draggedPoint };
+  }
+  return pts;
+}
+
+/**
+ * 8 interactive handles for Rectangle geometry (4 corners + 4 edge midpoints).
+ */
+export interface RectangleHandleInfo {
+  index: number;
+  role: HandleRole;
+  cursor: HandleCursor;
+  label: string;
+  point: DrawingPoint;
+}
+
+/**
+ * Resolves all 8 interactive handles for a rectangle from its 2 bounding corners.
+ */
+export function getRectangle8Handles(points: DrawingPoint[]): RectangleHandleInfo[] {
+  if (points.length < 2) return [];
+  const p1 = points[0];
+  const p2 = points[1];
+
+  const minT = Math.min(p1.timestamp, p2.timestamp);
+  const maxT = Math.max(p1.timestamp, p2.timestamp);
+  const minP = Math.min(p1.price, p2.price);
+  const maxP = Math.max(p1.price, p2.price);
+  const midT = (minT + maxT) / 2;
+  const midP = (minP + maxP) / 2;
+
+  return [
+    // 4 Corner Handles (2D resizing)
+    { index: 0, role: 'vertex', cursor: 'nwse-resize', label: 'Top-Left', point: { timestamp: minT, price: maxP } },
+    { index: 1, role: 'vertex', cursor: 'nesw-resize', label: 'Top-Right', point: { timestamp: maxT, price: maxP } },
+    { index: 2, role: 'vertex', cursor: 'nwse-resize', label: 'Bottom-Right', point: { timestamp: maxT, price: minP } },
+    { index: 3, role: 'vertex', cursor: 'nesw-resize', label: 'Bottom-Left', point: { timestamp: minT, price: minP } },
+    // 4 Edge Midpoint Handles (1D axial resizing)
+    { index: 4, role: 'midpoint', cursor: 'ns-resize', label: 'Top Edge', point: { timestamp: midT, price: maxP } },
+    { index: 5, role: 'midpoint', cursor: 'ew-resize', label: 'Right Edge', point: { timestamp: maxT, price: midP } },
+    { index: 6, role: 'midpoint', cursor: 'ns-resize', label: 'Bottom Edge', point: { timestamp: midT, price: minP } },
+    { index: 7, role: 'midpoint', cursor: 'ew-resize', label: 'Left Edge', point: { timestamp: minT, price: midP } },
+  ];
+}
+
+/**
+ * Solves topological constraints for Rectangle handle dragging.
+ * Handles 0..3 resize both dimensions; Handles 4 & 6 resize ONLY price; Handles 5 & 7 resize ONLY time.
+ */
+export function solveRectangleHandleDrag(
+  handleIndex: number,
+  draggedPoint: DrawingPoint,
+  currentPoints: DrawingPoint[],
+  _isShiftPressed = false,
+): DrawingPoint[] {
+  if (currentPoints.length < 2) return currentPoints;
+  const p1 = currentPoints[0];
+  const p2 = currentPoints[1];
+
+  let minT = Math.min(p1.timestamp, p2.timestamp);
+  let maxT = Math.max(p1.timestamp, p2.timestamp);
+  let minP = Math.min(p1.price, p2.price);
+  let maxP = Math.max(p1.price, p2.price);
+
+  switch (handleIndex) {
+    // Corner 0: Top-Left (adjusts minT and maxP)
+    case 0:
+      minT = draggedPoint.timestamp;
+      maxP = draggedPoint.price;
+      break;
+    // Corner 1: Top-Right (adjusts maxT and maxP)
+    case 1:
+      maxT = draggedPoint.timestamp;
+      maxP = draggedPoint.price;
+      break;
+    // Corner 2: Bottom-Right (adjusts maxT and minP)
+    case 2:
+      maxT = draggedPoint.timestamp;
+      minP = draggedPoint.price;
+      break;
+    // Corner 3: Bottom-Left (adjusts minT and minP)
+    case 3:
+      minT = draggedPoint.timestamp;
+      minP = draggedPoint.price;
+      break;
+    // Edge Midpoint 4: Top Edge (adjusts ONLY maxP)
+    case 4:
+      maxP = draggedPoint.price;
+      break;
+    // Edge Midpoint 5: Right Edge (adjusts ONLY maxT)
+    case 5:
+      maxT = draggedPoint.timestamp;
+      break;
+    // Edge Midpoint 6: Bottom Edge (adjusts ONLY minP)
+    case 6:
+      minP = draggedPoint.price;
+      break;
+    // Edge Midpoint 7: Left Edge (adjusts ONLY minT)
+    case 7:
+      minT = draggedPoint.timestamp;
+      break;
+    default:
+      return currentPoints;
+  }
+
+  return [
+    { timestamp: minT, price: minP },
+    { timestamp: maxT, price: maxP },
+  ];
+}
+
+/**
+ * Solves constraints for Rotated Rectangle handle dragging.
+ */
+export function solveRotatedRectangleConstraint(
+  handleIndex: number,
+  draggedPoint: DrawingPoint,
+  currentPoints: DrawingPoint[],
+): DrawingPoint[] {
+  const pts = [...currentPoints];
+  if (handleIndex === 0 || handleIndex === 1) {
+    const oldAnchor = pts[handleIndex];
+    if (oldAnchor) {
+      const dt = draggedPoint.timestamp - oldAnchor.timestamp;
+      const dp = draggedPoint.price - oldAnchor.price;
+      pts[handleIndex] = { ...draggedPoint };
+      if (pts[2]) {
+        pts[2] = {
+          timestamp: pts[2].timestamp + dt,
+          price: pts[2].price + dp,
+        };
+      }
+    }
+  } else if (handleIndex === 2) {
+    pts[2] = { ...draggedPoint };
+  }
+  return pts;
+}
+
+/**
+ * Solves topological constraints for Position tools (Long & Short Position).
+ * - Handle 0: Take Profit
+ * - Handle 1: Stop Loss
+ * - Handle 2: Entry Level (shifts entire setup vertically)
+ * - Handle 3: Duration / Width
+ */
+export function solvePositionHandleDrag(
+  type: 'long_position' | 'short_position',
+  handleIndex: number,
+  draggedPoint: DrawingPoint,
+  currentPoints: DrawingPoint[],
+  _style: DrawingStyle,
+): { updatedPoints: DrawingPoint[]; updatedStyle: Partial<DrawingStyle> } {
+  const isLong = type === 'long_position';
+  const pts = [...currentPoints];
+  const entryPrice = pts[0]?.price ?? 1.0;
+  const pipSize = getPipSize(entryPrice);
+  const minGap = pipSize * 0.5;
+
+  let updatedStyle: Partial<DrawingStyle> = {};
+
+  switch (handleIndex) {
+    case 0: {
+      // Take Profit (Target)
+      let newTp = draggedPoint.price;
+      if (isLong) {
+        newTp = Math.max(entryPrice + minGap, newTp);
+      } else {
+        newTp = Math.min(entryPrice - minGap, newTp);
+      }
+      pts[1] = {
+        timestamp: pts[1]?.timestamp ?? pts[0].timestamp,
+        price: newTp,
+      };
+      updatedStyle = { targetPrice: newTp };
+      break;
+    }
+    case 1: {
+      // Stop Loss
+      let newSl = draggedPoint.price;
+      if (isLong) {
+        newSl = Math.min(entryPrice - minGap, newSl);
+      } else {
+        newSl = Math.max(entryPrice + minGap, newSl);
+      }
+      pts[2] = {
+        timestamp: pts[2]?.timestamp ?? pts[0].timestamp,
+        price: newSl,
+      };
+      updatedStyle = { stopPrice: newSl };
+      break;
+    }
+    case 2: {
+      // Entry Level: shifts entire position vertically preserving risk/reward distances
+      const oldEntry = pts[0].price;
+      const dp = draggedPoint.price - oldEntry;
+      pts[0] = { ...pts[0], price: draggedPoint.price };
+      if (pts[1]) pts[1] = { ...pts[1], price: pts[1].price + dp };
+      if (pts[2]) pts[2] = { ...pts[2], price: pts[2].price + dp };
+      updatedStyle = {
+        entryPrice: draggedPoint.price,
+        targetPrice: pts[1]?.price,
+        stopPrice: pts[2]?.price,
+      };
+      break;
+    }
+    case 3: {
+      // Duration / Width Handle: adjusts time extent without modifying price levels
+      const newT = Math.max(pts[0].timestamp + 60, draggedPoint.timestamp);
+      if (pts[3]) {
+        pts[3] = { timestamp: newT, price: pts[3].price };
+      } else {
+        pts[3] = { timestamp: newT, price: pts[0].price };
+      }
+      break;
+    }
+  }
+
+  return { updatedPoints: pts, updatedStyle };
+}
+
+/**
+ * Constrains translation delta to strictly horizontal or vertical axis (Shift key modifier).
+ */
+export function constrainAxialTranslation(
+  dx: number,
+  dy: number,
+): { dx: number; dy: number } {
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return { dx, dy: 0 };
+  }
+  return { dx: 0, dy };
+}
+
+/**
+ * Centralized topological constraint solver dispatcher.
+ * Resolves handle drags for any tool across the system according to its geometric invariants.
+ */
+export function solveToolHandleConstraint(
+  type: DrawingType,
+  handleIndex: number,
+  draggedPoint: DrawingPoint,
+  currentPoints: DrawingPoint[],
+  style: DrawingStyle,
+  options?: { isShiftPressed?: boolean },
+): { updatedPoints: DrawingPoint[]; updatedStyle?: Partial<DrawingStyle> } {
+  switch (type) {
+    case 'parallel_channel':
+    case 'equidistant_channel':
+    case 'fib_channel': {
+      const updatedPoints = solveParallelChannelConstraint(handleIndex, draggedPoint, currentPoints);
+      return { updatedPoints };
+    }
+    case 'pitchfork':
+    case 'schiff_pitchfork':
+    case 'modified_schiff_pitchfork':
+    case 'inside_pitchfork': {
+      const variant =
+        type === 'schiff_pitchfork'
+          ? 'schiff'
+          : type === 'modified_schiff_pitchfork'
+            ? 'modified_schiff'
+            : type === 'inside_pitchfork'
+              ? 'inside'
+              : 'standard';
+      const updatedPoints = solvePitchforkConstraint(handleIndex, draggedPoint, currentPoints, variant);
+      return { updatedPoints };
+    }
+    case 'rectangle': {
+      const updatedPoints = solveRectangleHandleDrag(
+        handleIndex,
+        draggedPoint,
+        currentPoints,
+        options?.isShiftPressed,
+      );
+      return { updatedPoints };
+    }
+    case 'rotated_rectangle': {
+      const updatedPoints = solveRotatedRectangleConstraint(handleIndex, draggedPoint, currentPoints);
+      return { updatedPoints };
+    }
+    case 'long_position':
+    case 'short_position': {
+      return solvePositionHandleDrag(type, handleIndex, draggedPoint, currentPoints, style);
+    }
+    default: {
+      const pts = [...currentPoints];
+      if (handleIndex >= 0 && handleIndex < pts.length) {
+        pts[handleIndex] = { ...draggedPoint };
+      }
+      return { updatedPoints: pts };
+    }
+  }
+}
+

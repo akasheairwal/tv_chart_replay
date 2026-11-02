@@ -296,3 +296,12 @@ export function processPointerModifiers(
 | `Delete` / `Backspace` / `Middle Click` | Removal       | Delete drawing                             |
 | `Ctrl + Alt + H`                        | Visibility    | Hide / Show all drawings                   |
 | `Tab` / `Shift + Tab`                   | Focus         | Next / Prev cell in Table drawing          |
+
+---
+
+## 5. Related Architecture & Guides
+
+- **TradingView Drawing Tool Behaviors**: [tradingview-drawing-tool-behaviors.md](file:///d:/code/tv_chart_replay/docs/tradingview-drawing-tool-behaviors.md)
+- **TradingView Drawing Tool Icons**: [tradingview-drawing-tool-icons.md](file:///d:/code/tv_chart_replay/docs/tradingview-drawing-tool-icons.md)
+- **ADR 0003: Drawing Tools Engine Architecture & Interaction Model**: [0003-drawing-tools-architecture-and-interaction-model.md](file:///d:/code/tv_chart_replay/docs/adr/0003-drawing-tools-architecture-and-interaction-model.md)
+

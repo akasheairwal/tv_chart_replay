@@ -8,12 +8,14 @@ import {
   calculatePitchfork,
   calculatePositionHandleCoords,
   calculatePositionMetrics,
+  calculatePositionMetricsFromStyle,
   drawCatmullRomSpline,
   drawMidpointQuadraticSpline,
   formatCrosshairPrice,
   formatCrosshairTime,
   formatDuration,
   formatPriceChange,
+  getRectangle8Handles,
   smoothFreehandPoints,
 } from './drawing-math';
 import type { DrawingDefinition, DrawingPoint } from './drawing-types';
@@ -97,6 +99,113 @@ export function renderDrawingOnCanvas(
       }
       break;
     }
+    case 'info_line': {
+      if (p2) {
+        // Line segment
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        // Quantitative analytics
+        const deltaP = d.points[1].price - d.points[0].price;
+        const { text, pctText, pipsText, isPositive } = formatPriceChange(deltaP, d.points[0].price);
+        const { barCount, durText } = resolveBarStats(
+          d.points[0].timestamp,
+          d.points[1].timestamp,
+          d.points[0].price,
+          d.points[1].price,
+          getBarStats,
+        );
+
+        // Screen angle in degrees
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const angleDeg = -Math.round((Math.atan2(dy, dx) * 180) / Math.PI);
+        const signAngle = angleDeg > 0 ? `+${angleDeg}°` : `${angleDeg}°`;
+
+        // Midpoint HUD Statistics Card
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        const cardW = 185;
+        const cardH = 38;
+        const cx = Math.max(8, Math.min(w - cardW - 8, midX - cardW / 2));
+        const cy = Math.max(8, Math.min(h - cardH - 8, midY - cardH - 10));
+
+        ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
+        ctx.strokeStyle = isPositive ? '#089981' : '#f23645';
+        ctx.lineWidth = 1;
+        safeRoundRect(cx, cy, cardW, cardH, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        // Line 1: Price Delta, %, Pips
+        ctx.fillStyle = isPositive ? '#089981' : '#f23645';
+        ctx.font = 'bold 10.5px sans-serif';
+        ctx.fillText(`${text} (${pctText}) · ${pipsText}`, cx + 8, cy + 15);
+
+        // Line 2: Bar count, duration, angle, pixel distance
+        const lenPx = Math.round(Math.hypot(dx, dy));
+        ctx.fillStyle = '#d1d4dc';
+        ctx.font = '9.5px sans-serif';
+        ctx.fillText(`📊 ${barCount} bars, ${durText} · ∠ ${signAngle} (${lenPx}px)`, cx + 8, cy + 30);
+      }
+      break;
+    }
+    case 'trend_angle': {
+      if (p2) {
+        // Trendline
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        // Horizontal dotted reference baseline from P1
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const lineLen = Math.hypot(dx, dy);
+        const arcRadius = Math.min(45, Math.max(22, lineLen * 0.35));
+
+        ctx.save();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = '#787b86';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p1.x + (dx >= 0 ? arcRadius + 18 : -(arcRadius + 18)), p1.y);
+        ctx.stroke();
+
+        // Subtended arc
+        const endAngle = Math.atan2(dy, dx);
+        const startAngle = dx >= 0 ? 0 : Math.PI;
+        const counterClockwise = dy < 0;
+
+        ctx.setLineDash([]);
+        ctx.strokeStyle = d.style.color || '#2962ff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(p1.x, p1.y, arcRadius, startAngle, endAngle, !counterClockwise);
+        ctx.stroke();
+
+        // Angle badge
+        const angleDeg = Math.round(Math.abs((Math.atan2(-dy, dx) * 180) / Math.PI));
+        const badgeX = p1.x + (dx >= 0 ? arcRadius + 6 : -(arcRadius + 30));
+        const badgeY = p1.y - 6;
+
+        ctx.fillStyle = 'rgba(19, 23, 34, 0.92)';
+        ctx.strokeStyle = d.style.color || '#2962ff';
+        ctx.lineWidth = 1;
+        safeRoundRect(badgeX - 4, badgeY - 10, 36, 18, 3);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = d.style.color || '#2962ff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText(`${angleDeg}°`, badgeX, badgeY + 3);
+        ctx.restore();
+      }
+      break;
+    }
     case 'ray': {
       if (p2) {
         const dx = p2.x - p1.x;
@@ -144,6 +253,21 @@ export function renderDrawingOnCanvas(
       ctx.fillText(d.points[0].price.toFixed(4), w - 70, p1.y + 4);
       break;
     }
+    case 'horizontal_ray': {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(w, p1.y);
+      ctx.stroke();
+
+      // Right price badge
+      ctx.setLineDash([]);
+      ctx.fillStyle = d.style.color || '#2962ff';
+      ctx.fillRect(w - 75, p1.y - 10, 75, 20);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(d.points[0].price.toFixed(4), w - 70, p1.y + 4);
+      break;
+    }
     case 'vertical_line': {
       ctx.beginPath();
       ctx.moveTo(p1.x, 0);
@@ -161,6 +285,30 @@ export function renderDrawingOnCanvas(
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 10px sans-serif';
       ctx.fillText(dateStr, p1.x - 22, h - 8);
+      break;
+    }
+    case 'cross_line': {
+      ctx.beginPath();
+      ctx.moveTo(0, p1.y);
+      ctx.lineTo(w, p1.y);
+      ctx.moveTo(p1.x, 0);
+      ctx.lineTo(p1.x, h);
+      ctx.stroke();
+
+      // Right price badge
+      ctx.setLineDash([]);
+      ctx.fillStyle = d.style.color || '#2962ff';
+      ctx.fillRect(w - 75, p1.y - 10, 75, 20);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(d.points[0].price.toFixed(4), w - 70, p1.y + 4);
+
+      // Bottom date badge
+      const timeStr = formatCrosshairTime(d.points[0].timestamp, '1h');
+      ctx.fillRect(p1.x - 45, h - 22, 90, 20);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(timeStr, p1.x - 38, h - 8);
       break;
     }
     case 'arrow': {
@@ -201,6 +349,42 @@ export function renderDrawingOnCanvas(
       }
       break;
     }
+    case 'rotated_rectangle': {
+      if (p2) {
+        if (p3) {
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const len = Math.hypot(dx, dy);
+          if (len > 0) {
+            const nx = -dy / len;
+            const ny = dx / len;
+            const vx = p3.x - p2.x;
+            const vy = p3.y - p2.y;
+            const perpDist = vx * nx + vy * ny;
+            const hx = nx * perpDist;
+            const hy = ny * perpDist;
+
+            const p3Calc = { x: p2.x + hx, y: p2.y + hy };
+            const p4Calc = { x: p1.x + hx, y: p1.y + hy };
+
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3Calc.x, p3Calc.y);
+            ctx.lineTo(p4Calc.x, p4Calc.y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
     case 'ellipse': {
       if (p2) {
         const cx = (p1.x + p2.x) / 2;
@@ -234,6 +418,22 @@ export function renderDrawingOnCanvas(
         ctx.lineTo(p3.x, p3.y);
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'polyline':
+    case 'path': {
+      if (pts.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        if (d.style.fillColor && d.style.fillColor !== 'transparent') {
+          ctx.closePath();
+          ctx.fill();
+        }
         ctx.stroke();
       }
       break;
@@ -692,6 +892,7 @@ export function renderDrawingOnCanvas(
       break;
     }
 
+    case 'date_and_price_range':
     case 'measurement': {
       if (p2) {
         const deltaP = d.points[1].price - d.points[0].price;
@@ -733,8 +934,7 @@ export function renderDrawingOnCanvas(
         ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
         ctx.strokeStyle = isPositive ? '#089981' : '#f23645';
         ctx.lineWidth = 1;
-        safeRoundRect(
-        cx, cy, cardW, cardH, 5);
+        safeRoundRect(cx, cy, cardW, cardH, 5);
         ctx.fill();
         ctx.stroke();
 
@@ -751,11 +951,77 @@ export function renderDrawingOnCanvas(
       break;
     }
 
+    case 'forecast': {
+      if (p2) {
+        const deltaP = d.points[1].price - d.points[0].price;
+        const { text, pctText, isPositive } = formatPriceChange(deltaP, d.points[0].price);
+        const { barCount, durText } = resolveBarStats(
+          d.points[0].timestamp,
+          d.points[1].timestamp,
+          d.points[0].price,
+          d.points[1].price,
+          getBarStats,
+        );
+
+        const minX = Math.min(p1.x, p2.x);
+        const maxX = Math.max(p1.x, p2.x);
+        const minY = Math.min(p1.y, p2.y);
+        const maxY = Math.max(p1.y, p2.y);
+
+        // Shaded forecast region
+        ctx.fillStyle = isPositive ? 'rgba(8, 153, 129, 0.15)' : 'rgba(242, 54, 69, 0.15)';
+        ctx.strokeStyle = isPositive ? '#089981' : '#f23645';
+        ctx.lineWidth = 1.5;
+
+        ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+
+        // Projection rays
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p1.y);
+        ctx.stroke();
+        ctx.restore();
+
+        // Status badge
+        const badgeW = 165;
+        const badgeH = 40;
+        const bx = Math.max(8, Math.min(w - badgeW - 8, maxX - badgeW));
+        const by = Math.max(8, Math.min(h - badgeH - 8, p2.y - (isPositive ? 44 : -8)));
+
+        ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
+        ctx.strokeStyle = isPositive ? '#089981' : '#f23645';
+        ctx.lineWidth = 1;
+        safeRoundRect(bx, by, badgeW, badgeH, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isPositive ? '#089981' : '#f23645';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText(`Target: ${text} (${pctText})`, bx + 8, by + 16);
+
+        ctx.fillStyle = '#d1d4dc';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(`⏳ ${barCount} bars (${durText})`, bx + 8, by + 32);
+      }
+      break;
+    }
+
     // -- 5. Dynamic Long & Short Position (Full TradingView Style) -----
     case 'long_position':
     case 'short_position': {
       if (p1) {
-        const metrics = calculatePositionMetrics(d.type, d.points, d.style);
+        const metrics = calculatePositionMetricsFromStyle(
+          d.type,
+          d.points,
+          d.style,
+          undefined,
+          d.symbol,
+        );
         const {
           isLong,
           entryPrice,
@@ -771,6 +1037,7 @@ export function renderDrawingOnCanvas(
           profitDollar,
           lossDollar,
           endTimestamp,
+          isMarginExceeded,
         } = metrics;
 
         const tpPixel = chartToPixel({ timestamp: d.points[0].timestamp, price: tpPrice });
@@ -807,14 +1074,14 @@ export function renderDrawingOnCanvas(
         ctx.fillRect(leftX, topProfitY, width, profitHeight);
         ctx.strokeRect(leftX, topProfitY, width, profitHeight);
 
-        // Target Tag Header/Footer (only rendered when selected)
+        // Target Tag Header/Footer (only rendered when selected or alwaysShowStats)
         if (showStats) {
           const tagY = isLong ? topProfitY - 20 : Math.max(entryY, tpY);
           ctx.fillStyle = 'rgba(8, 153, 129, 0.95)';
           const targetTagText = `Target: ${formatCrosshairPrice(tpPrice, d.symbol)} (+${tpPips.toFixed(1)} pips, +${tpPct.toFixed(2)}%) · +$${profitDollar.toFixed(2)}`;
           ctx.font = 'bold 10px sans-serif';
           const textLen = ctx.measureText ? ctx.measureText(targetTagText).width : targetTagText.length * 6;
-          const targetTagW = Math.min(width, Math.max(180, textLen + 12));
+          const targetTagW = Math.max(170, textLen + 14);
 
           ctx.beginPath();
           if (typeof (ctx as any).roundRect === 'function') {
@@ -836,13 +1103,13 @@ export function renderDrawingOnCanvas(
         ctx.fillRect(leftX, topLossY, width, lossHeight);
         ctx.strokeRect(leftX, topLossY, width, lossHeight);
 
-        // Stop Tag Header/Footer (only rendered when selected)
+        // Stop Tag Header/Footer (only rendered when selected or alwaysShowStats)
         if (showStats) {
           const stopTagY = isLong ? Math.max(entryY, slY) : topLossY - 20;
           ctx.fillStyle = 'rgba(242, 54, 69, 0.95)';
           const stopTagText = `Stop: ${formatCrosshairPrice(slPrice, d.symbol)} (-${slPips.toFixed(1)} pips, -${slPct.toFixed(2)}%) · -$${lossDollar.toFixed(2)}`;
           const stopTextLen = ctx.measureText ? ctx.measureText(stopTagText).width : stopTagText.length * 6;
-          const stopTagW = Math.min(width, Math.max(180, stopTextLen + 12));
+          const stopTagW = Math.max(170, stopTextLen + 14);
 
           ctx.beginPath();
           if (typeof (ctx as any).roundRect === 'function') {
@@ -867,7 +1134,7 @@ export function renderDrawingOnCanvas(
         if (showStats) {
           const isCompact = d.style.compactStats ?? false;
           const cardW = isCompact ? 140 : 210;
-          const cardH = isCompact ? 28 : 46;
+          const cardH = isCompact ? 28 : isMarginExceeded ? 58 : 46;
           const cardX = (leftX + rightX) / 2 - cardW / 2;
           const cardY = entryY - cardH / 2;
 
@@ -907,6 +1174,12 @@ export function renderDrawingOnCanvas(
             ctx.fillStyle = '#787b86';
             ctx.font = '9.5px sans-serif';
             ctx.fillText(`${barCount} bars (${durText})`, cardX + 8, cardY + 42);
+
+            if (isMarginExceeded) {
+              ctx.fillStyle = '#ff9800';
+              ctx.font = 'bold 9px sans-serif';
+              ctx.fillText('⚠️ Margin Required > Equity', cardX + 8, cardY + 53);
+            }
           }
         }
       }
@@ -914,6 +1187,30 @@ export function renderDrawingOnCanvas(
     }
 
     // -- 5. Freehand & Vector Drawing Tools ---------------------------
+    case 'highlighter': {
+      if (pts.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = d.style.color || '#ffeb3b';
+        ctx.lineWidth = Math.max(12, (d.style.width || 1) * 6);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.35;
+
+        if (pts.length === 1) {
+          ctx.beginPath();
+          ctx.arc(pts[0].x, pts[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          drawMidpointQuadraticSpline(ctx, pts);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      break;
+    }
+
     case 'brush': {
       if (pts.length > 0) {
         ctx.save();
@@ -1024,7 +1321,40 @@ export function renderDrawingOnCanvas(
         ctx.lineWidth = 2.5;
         ctx.stroke();
       }
-    } else if (d.type === 'brush' || d.type === 'pencil' || d.type === 'pen') {
+    } else if (d.type === 'rectangle' && d.points.length >= 2) {
+      const handles8 = getRectangle8Handles(d.points);
+      for (const h of handles8) {
+        const pix = chartToPixel(h.point);
+        if (!pix) continue;
+        ctx.beginPath();
+        ctx.arc(pix.x, pix.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = d.style.color || '#2962ff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    } else if (
+      (d.type === 'trend_line' || d.type === 'info_line' || d.type === 'trend_angle') &&
+      p1 &&
+      p2
+    ) {
+      const midPoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      for (const pt of [p1, p2, midPoint]) {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = d.style.color || '#2962ff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    } else if (
+      d.type === 'brush' ||
+      d.type === 'pencil' ||
+      d.type === 'pen' ||
+      d.type === 'highlighter'
+    ) {
       const handleIndices = [0, Math.floor((pts.length - 1) / 2), pts.length - 1];
       for (const idx of handleIndices) {
         if (pts[idx]) {

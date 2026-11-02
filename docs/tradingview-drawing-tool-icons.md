@@ -177,6 +177,7 @@ The drawing suite is partitioned into 10 functional groups:
 ## 5. References & Further Reading
 
 - **TradingView Drawing Shortcuts Reference**: [tradingview-drawing-shortcuts.md](file:///d:/code/tv_chart_replay/docs/tradingview-drawing-shortcuts.md)
+- **TradingView Drawing Tool Behaviors**: [tradingview-drawing-tool-behaviors.md](file:///d:/code/tv_chart_replay/docs/tradingview-drawing-tool-behaviors.md)
 - **Drawing Architecture & Interaction Model (ADR 0003)**: [0003-drawing-tools-architecture-and-interaction-model.md](file:///d:/code/tv_chart_replay/docs/adr/0003-drawing-tools-architecture-and-interaction-model.md)
 - **Frontend Vector Icons Registry**: [icons.ts](file:///d:/code/tv_chart_replay/frontend/src/ui/icons.ts)
 - **Drawing Types & Categories**: [drawing-types.ts](file:///d:/code/tv_chart_replay/frontend/src/drawings/drawing-types.ts)
