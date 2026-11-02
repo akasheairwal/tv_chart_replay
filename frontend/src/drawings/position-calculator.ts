@@ -635,6 +635,7 @@ export type CandleInputRow =
 
 export interface PositionPriceEvaluation {
   status: PositionOutcomeStatus;
+  activationTimestamp?: number;
   exitTimestamp?: number;
   exitPrice?: number;
   /** Realized (if closed) or unrealized (if open) price difference. Positive = profit, Negative = loss */
@@ -685,6 +686,7 @@ export function evaluatePositionPriceAction(
     return {
       status: 'PLANNED',
       pnlDiff: 0,
+      pnlAmount: 0,
       pnlPct: 0,
       barsCount: 0,
       isClosed: false,
@@ -697,6 +699,7 @@ export function evaluatePositionPriceAction(
     return {
       status: 'PLANNED',
       pnlDiff: 0,
+      pnlAmount: 0,
       pnlPct: 0,
       barsCount: 0,
       isClosed: false,
@@ -723,24 +726,55 @@ export function evaluatePositionPriceAction(
     ? endTimestamp
     : Infinity;
 
+  let isActivated = false;
+  let activationTimestamp: number | undefined;
   let evaluatedBars = 0;
   let lastCandle = normalizeCandleRow(candles[startIdx]);
+  let prevClose: number | undefined = startIdx > 0 ? normalizeCandleRow(candles[startIdx - 1]).c : undefined;
 
   for (let i = startIdx; i < candles.length; i++) {
     const bar = normalizeCandleRow(candles[i]);
     if (bar.t > maxTime) break;
 
+    if (!isActivated) {
+      const touchesDirectly = entryPrice >= bar.l - 1e-8 && entryPrice <= bar.h + 1e-8;
+      const gappedAcross = prevClose !== undefined && (
+        (prevClose < entryPrice - 1e-8 && bar.l > entryPrice + 1e-8) ||
+        (prevClose > entryPrice + 1e-8 && bar.h < entryPrice - 1e-8)
+      );
+
+      if (touchesDirectly || gappedAcross) {
+        isActivated = true;
+        activationTimestamp = bar.t;
+      } else {
+        prevClose = bar.c;
+        continue;
+      }
+    }
+
     evaluatedBars++;
     lastCandle = bar;
 
+    const isActivationBar = bar.t === activationTimestamp;
+
     if (isLong) {
-      const hitTP = bar.h >= tpPrice;
-      const hitSL = bar.l <= slPrice;
+      let hitTP = bar.h >= tpPrice - 1e-8;
+      let hitSL = bar.l <= slPrice + 1e-8;
+
+      if (isActivationBar) {
+        if (bar.o >= tpPrice) {
+          hitTP = bar.c >= tpPrice - 1e-8;
+        }
+        if (bar.o <= slPrice) {
+          hitSL = bar.c <= slPrice + 1e-8;
+        }
+      }
 
       if (hitTP && !hitSL) {
         const diff = Math.abs(tpPrice - entryPrice);
         return {
           status: 'WIN',
+          activationTimestamp,
           exitTimestamp: bar.t,
           exitPrice: tpPrice,
           pnlDiff: diff,
@@ -756,6 +790,7 @@ export function evaluatePositionPriceAction(
         const diff = -Math.abs(entryPrice - slPrice);
         return {
           status: 'LOSS',
+          activationTimestamp,
           exitTimestamp: bar.t,
           exitPrice: slPrice,
           pnlDiff: diff,
@@ -785,6 +820,7 @@ export function evaluatePositionPriceAction(
           const diff = Math.abs(tpPrice - entryPrice);
           return {
             status: 'WIN',
+            activationTimestamp,
             exitTimestamp: bar.t,
             exitPrice: tpPrice,
             pnlDiff: diff,
@@ -798,6 +834,7 @@ export function evaluatePositionPriceAction(
           const diff = -Math.abs(entryPrice - slPrice);
           return {
             status: 'LOSS',
+            activationTimestamp,
             exitTimestamp: bar.t,
             exitPrice: slPrice,
             pnlDiff: diff,
@@ -811,13 +848,23 @@ export function evaluatePositionPriceAction(
       }
     } else {
       // Short position
-      const hitTP = bar.l <= tpPrice;
-      const hitSL = bar.h >= slPrice;
+      let hitTP = bar.l <= tpPrice + 1e-8;
+      let hitSL = bar.h >= slPrice - 1e-8;
+
+      if (isActivationBar) {
+        if (bar.o <= tpPrice) {
+          hitTP = bar.c <= tpPrice + 1e-8;
+        }
+        if (bar.o >= slPrice) {
+          hitSL = bar.c >= slPrice - 1e-8;
+        }
+      }
 
       if (hitTP && !hitSL) {
         const diff = Math.abs(entryPrice - tpPrice);
         return {
           status: 'WIN',
+          activationTimestamp,
           exitTimestamp: bar.t,
           exitPrice: tpPrice,
           pnlDiff: diff,
@@ -833,6 +880,7 @@ export function evaluatePositionPriceAction(
         const diff = -Math.abs(slPrice - entryPrice);
         return {
           status: 'LOSS',
+          activationTimestamp,
           exitTimestamp: bar.t,
           exitPrice: slPrice,
           pnlDiff: diff,
@@ -862,6 +910,7 @@ export function evaluatePositionPriceAction(
           const diff = Math.abs(entryPrice - tpPrice);
           return {
             status: 'WIN',
+            activationTimestamp,
             exitTimestamp: bar.t,
             exitPrice: tpPrice,
             pnlDiff: diff,
@@ -875,6 +924,7 @@ export function evaluatePositionPriceAction(
           const diff = -Math.abs(slPrice - entryPrice);
           return {
             status: 'LOSS',
+            activationTimestamp,
             exitTimestamp: bar.t,
             exitPrice: slPrice,
             pnlDiff: diff,
@@ -889,13 +939,14 @@ export function evaluatePositionPriceAction(
     }
   }
 
-  if (evaluatedBars > 0) {
+  if (isActivated && evaluatedBars > 0) {
     const currentPrice = lastCandle.c;
     const diff = isLong ? (currentPrice - entryPrice) : (entryPrice - currentPrice);
     const pnlAmount = diff * lotSize * contractSize;
     const pnlPct = entryPrice > 0 ? (diff / entryPrice) * 100 : 0;
     return {
       status: 'OPEN',
+      activationTimestamp,
       exitTimestamp: lastCandle.t,
       exitPrice: currentPrice,
       currentPrice,
@@ -911,6 +962,7 @@ export function evaluatePositionPriceAction(
   return {
     status: 'PLANNED',
     pnlDiff: 0,
+    pnlAmount: 0,
     pnlPct: 0,
     barsCount: 0,
     isClosed: false,

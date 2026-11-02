@@ -200,7 +200,7 @@ export interface DrawingStyle {
   accountCurrency?: string;
   lotPrecision?: number;
   closedPnL?: number;
-  outcome?: 'win' | 'loss' | 'open';
+  outcome?: 'win' | 'loss' | 'open' | 'planned';
   qty?: number;
   exitTimestamp?: number;
   exitPrice?: number;

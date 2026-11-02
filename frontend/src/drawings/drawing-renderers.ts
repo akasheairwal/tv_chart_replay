@@ -1251,11 +1251,19 @@ export function renderDrawingOnCanvas(
         let exitPriceVal: number | undefined;
 
         if (hasExplicitPnL || hasExplicitOutcome || hasExplicitExit) {
-          const isLoss = d.style.outcome === 'loss' || (hasExplicitPnL && d.style.closedPnL! < 0);
-          outcomeStatus = isLoss ? 'LOSS' : 'WIN';
-          pnlVal = hasExplicitPnL ? d.style.closedPnL! : (isLoss ? -slDiff : tpDiff);
+          if (d.style.outcome === 'planned') {
+            outcomeStatus = 'PLANNED';
+            pnlVal = 0;
+          } else if (d.style.outcome === 'open') {
+            outcomeStatus = 'OPEN';
+            pnlVal = hasExplicitPnL ? d.style.closedPnL! : 0;
+          } else {
+            const isLoss = d.style.outcome === 'loss' || (hasExplicitPnL && d.style.closedPnL! < 0);
+            outcomeStatus = isLoss ? 'LOSS' : 'WIN';
+            pnlVal = hasExplicitPnL ? d.style.closedPnL! : (isLoss ? -slDiff : tpDiff);
+          }
           exitTimestamp = d.style.exitTimestamp;
-          exitPriceVal = d.style.exitPrice ?? (isLoss ? slPrice : tpPrice);
+          exitPriceVal = d.style.exitPrice ?? (outcomeStatus === 'LOSS' ? slPrice : (outcomeStatus === 'WIN' ? tpPrice : entryPrice));
         } else if (rc.candles && rc.candles.length > 0) {
           outcomeStatus = evalResult.status;
           pnlVal = evalResult.pnlDiff;
@@ -1339,12 +1347,17 @@ export function renderDrawingOnCanvas(
 
         // 4. Subtle Dashed Trade Trajectory Line (from entry to exit point)
         if (!isPlanned && (exitPixel || isClosedWin || isClosedLoss || isOpen)) {
+          const actPixel = evalResult.activationTimestamp
+            ? chartToPixel({ timestamp: evalResult.activationTimestamp, price: entryPrice })
+            : null;
+          const actX = actPixel ? Math.min(splitX, Math.max(leftX, actPixel.x)) : leftX;
+
           ctx.save();
           ctx.strokeStyle = 'rgba(160, 165, 175, 0.75)';
           ctx.lineWidth = 1.2;
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
-          ctx.moveTo(leftX, entryY);
+          ctx.moveTo(actX, entryY);
           ctx.lineTo(splitX, exitY);
           ctx.stroke();
           ctx.restore();
