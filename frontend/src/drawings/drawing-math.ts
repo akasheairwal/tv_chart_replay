@@ -409,6 +409,10 @@ export {
   solveLotSizeForRisk,
   calculateRangeMetrics,
   evaluateForecastOutcome,
+  evaluatePositionPriceAction,
+  type PositionOutcomeStatus,
+  type PositionPriceEvaluation,
+  type CandleInputRow,
 } from './position-calculator';
 
 import type { PositionMetrics, DetailedPositionMetrics } from './position-calculator';

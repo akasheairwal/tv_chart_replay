@@ -218,6 +218,38 @@ flowchart TD
 
 ---
 
+### 4.5 Real-Time Price Action Evaluation & Dynamic Trajectory Engine
+
+To transition the position tool from static mock fractions to live price-action functionality, the renderer couples with `evaluatePositionPriceAction(...)`.
+
+#### Evaluation Algorithm
+1. **Candle Stream Inspection**:
+   Evaluates historical or replaying bars starting from $t_{\text{entry}}$ up to $\min(t_{\text{end}}, t_{\text{current}})$:
+   - For **Long Positions**:
+     - $\text{bar.high} \ge p_{\text{target}} \implies \text{WIN}$ (Exit at $p_{\text{target}}$ on that bar).
+     - $\text{bar.low} \le p_{\text{stop}} \implies \text{LOSS}$ (Exit at $p_{\text{stop}}$ on that bar).
+   - For **Short Positions**:
+     - $\text{bar.low} \le p_{\text{target}} \implies \text{WIN}$ (Exit at $p_{\text{target}}$ on that bar).
+     - $\text{bar.high} \ge p_{\text{stop}} \implies \text{LOSS}$ (Exit at $p_{\text{stop}}$ on that bar).
+
+2. **Intrabar Ambiguity Resolution**:
+   When both target and stop are breached within the same candle:
+   - Bullish bar ($\text{close} \ge \text{open}$): open $\to$ low $\to$ high $\to$ close. The dip occurred before the rally (Stop checked before Target for Long).
+   - Bearish bar ($\text{close} < \text{open}$): open $\to$ high $\to$ low $\to$ close. The rally occurred before the drop (Target checked before Stop for Long).
+
+3. **Lifecycle State Machine**:
+   - `WIN`: Trade reached TP. Trajectory dashed line connects $(x_{\text{entry}}, y_{\text{entry}})$ to $(x_{\text{exit}}, y_{\text{tp}})$. Center card turns solid green (`#089981`) with `Closed PnL: <+val>, Qty: <qty>`.
+   - `LOSS`: Trade reached SL. Trajectory dashed line connects $(x_{\text{entry}}, y_{\text{entry}})$ to $(x_{\text{exit}}, y_{\text{sl}})$. Center card turns solid red (`#f23645`) with `Closed PnL: <-val>, Qty: <qty>`.
+   - `OPEN`: Price is running within range. Trajectory dashed line connects to current bar $(x_{\text{current}}, y_{\text{close}})$. Center card reflects unrealized PnL: `Open PnL: <±val>, Qty: <qty>` (Green if in profit, Red if in loss).
+   - `PLANNED`: Future setup where $t_{\text{entry}} > t_{\text{current}}$. Trajectory line hidden; center card displays planned `Risk/reward ratio: <rr>`.
+
+4. **Dual-Zone Opacity Shading**:
+   The canvas splits horizontally at $X_{\text{split}} = \text{chartToPixel}(t_{\text{exit}})$:
+   - **Active Zone** ($x_{\text{left}} \to X_{\text{split}}$): Rendered with high opacity ($\approx 32\%$) representing the executed market exposure.
+   - **Projection Zone** ($X_{\text{split}} \to x_{\text{right}}$): Rendered with base transparency ($\approx 16\% - 20\%$) representing the visual planning envelope.
+
+---
+
 ## 5. Implementation Roadmap
 
 1. **Phase 1: Type & Style Token Enhancements (`drawing-types.ts`)**:

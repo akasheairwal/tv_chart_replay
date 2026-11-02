@@ -626,3 +626,295 @@ export function evaluateForecastOutcome(
     finalPnlPct,
   };
 }
+
+export type PositionOutcomeStatus = 'WIN' | 'LOSS' | 'OPEN' | 'PLANNED';
+
+export type CandleInputRow =
+  | [timestamp: number, open: number, high: number, low: number, close: number, volume?: number]
+  | { timestamp: number; open: number; high: number; low: number; close: number; volume?: number };
+
+export interface PositionPriceEvaluation {
+  status: PositionOutcomeStatus;
+  exitTimestamp?: number;
+  exitPrice?: number;
+  /** Realized (if closed) or unrealized (if open) price difference. Positive = profit, Negative = loss */
+  pnlDiff: number;
+  /** Monetary PnL in currency units if lot/units are known */
+  pnlAmount?: number;
+  /** Realized/unrealized return percentage */
+  pnlPct: number;
+  /** Number of candles evaluated */
+  barsCount: number;
+  /** Current price at evaluation time (for OPEN positions) */
+  currentPrice?: number;
+  /** Whether the trade has reached TP or SL */
+  isClosed: boolean;
+  /** True if winning trade (or open trade in profit) */
+  isProfit: boolean;
+}
+
+/**
+ * Normalizes a CandleInputRow (array or object) into standard fields.
+ */
+function normalizeCandleRow(row: CandleInputRow): { t: number; o: number; h: number; l: number; c: number } {
+  if (Array.isArray(row)) {
+    return { t: row[0], o: row[1], h: row[2], l: row[3], c: row[4] };
+  }
+  return { t: row.timestamp, o: row.open, h: row.high, l: row.low, c: row.close };
+}
+
+/**
+ * Evaluates the outcome of a Long Position or Short Position drawing tool against candlestick history.
+ * Tracks bar-by-bar progression from entry timestamp to detect target hit, stop hit, or active open status.
+ */
+export function evaluatePositionPriceAction(
+  type: 'long_position' | 'short_position',
+  entryPoint: { timestamp: number; price: number },
+  tpPrice: number,
+  slPrice: number,
+  endTimestamp?: number,
+  candles?: CandleInputRow[],
+  contractSize = 1,
+  lotSize = 1,
+): PositionPriceEvaluation {
+  const isLong = type === 'long_position';
+  const entryPrice = entryPoint.price;
+  const entryTimestamp = entryPoint.timestamp;
+
+  if (!candles || candles.length === 0) {
+    return {
+      status: 'PLANNED',
+      pnlDiff: 0,
+      pnlPct: 0,
+      barsCount: 0,
+      isClosed: false,
+      isProfit: false,
+    };
+  }
+
+  const latestCandle = normalizeCandleRow(candles[candles.length - 1]);
+  if (entryTimestamp > latestCandle.t) {
+    return {
+      status: 'PLANNED',
+      pnlDiff: 0,
+      pnlPct: 0,
+      barsCount: 0,
+      isClosed: false,
+      isProfit: false,
+    };
+  }
+
+  // Find index of entry candle
+  let startIdx = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const c = normalizeCandleRow(candles[i]);
+    const nextT = i + 1 < candles.length ? normalizeCandleRow(candles[i + 1]).t : Infinity;
+    if (entryTimestamp >= c.t && entryTimestamp < nextT) {
+      startIdx = i;
+      break;
+    }
+    if (c.t >= entryTimestamp) {
+      startIdx = i;
+      break;
+    }
+  }
+
+  const maxTime = endTimestamp !== undefined && endTimestamp > entryTimestamp
+    ? endTimestamp
+    : Infinity;
+
+  let evaluatedBars = 0;
+  let lastCandle = normalizeCandleRow(candles[startIdx]);
+
+  for (let i = startIdx; i < candles.length; i++) {
+    const bar = normalizeCandleRow(candles[i]);
+    if (bar.t > maxTime) break;
+
+    evaluatedBars++;
+    lastCandle = bar;
+
+    if (isLong) {
+      const hitTP = bar.h >= tpPrice;
+      const hitSL = bar.l <= slPrice;
+
+      if (hitTP && !hitSL) {
+        const diff = Math.abs(tpPrice - entryPrice);
+        return {
+          status: 'WIN',
+          exitTimestamp: bar.t,
+          exitPrice: tpPrice,
+          pnlDiff: diff,
+          pnlAmount: diff * lotSize * contractSize,
+          pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+          barsCount: evaluatedBars,
+          isClosed: true,
+          isProfit: true,
+        };
+      }
+
+      if (hitSL && !hitTP) {
+        const diff = -Math.abs(entryPrice - slPrice);
+        return {
+          status: 'LOSS',
+          exitTimestamp: bar.t,
+          exitPrice: slPrice,
+          pnlDiff: diff,
+          pnlAmount: diff * lotSize * contractSize,
+          pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+          barsCount: evaluatedBars,
+          isClosed: true,
+          isProfit: false,
+        };
+      }
+
+      if (hitTP && hitSL) {
+        let winFirst = false;
+        if (bar.o >= tpPrice) {
+          winFirst = true;
+        } else if (bar.o <= slPrice) {
+          winFirst = false;
+        } else if (bar.c >= bar.o) {
+          // Bullish candle: opened, dipped to low, rallied to high, closed
+          winFirst = false;
+        } else {
+          // Bearish candle: opened, rallied to high, dropped to low, closed
+          winFirst = true;
+        }
+
+        if (winFirst) {
+          const diff = Math.abs(tpPrice - entryPrice);
+          return {
+            status: 'WIN',
+            exitTimestamp: bar.t,
+            exitPrice: tpPrice,
+            pnlDiff: diff,
+            pnlAmount: diff * lotSize * contractSize,
+            pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+            barsCount: evaluatedBars,
+            isClosed: true,
+            isProfit: true,
+          };
+        } else {
+          const diff = -Math.abs(entryPrice - slPrice);
+          return {
+            status: 'LOSS',
+            exitTimestamp: bar.t,
+            exitPrice: slPrice,
+            pnlDiff: diff,
+            pnlAmount: diff * lotSize * contractSize,
+            pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+            barsCount: evaluatedBars,
+            isClosed: true,
+            isProfit: false,
+          };
+        }
+      }
+    } else {
+      // Short position
+      const hitTP = bar.l <= tpPrice;
+      const hitSL = bar.h >= slPrice;
+
+      if (hitTP && !hitSL) {
+        const diff = Math.abs(entryPrice - tpPrice);
+        return {
+          status: 'WIN',
+          exitTimestamp: bar.t,
+          exitPrice: tpPrice,
+          pnlDiff: diff,
+          pnlAmount: diff * lotSize * contractSize,
+          pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+          barsCount: evaluatedBars,
+          isClosed: true,
+          isProfit: true,
+        };
+      }
+
+      if (hitSL && !hitTP) {
+        const diff = -Math.abs(slPrice - entryPrice);
+        return {
+          status: 'LOSS',
+          exitTimestamp: bar.t,
+          exitPrice: slPrice,
+          pnlDiff: diff,
+          pnlAmount: diff * lotSize * contractSize,
+          pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+          barsCount: evaluatedBars,
+          isClosed: true,
+          isProfit: false,
+        };
+      }
+
+      if (hitTP && hitSL) {
+        let winFirst = false;
+        if (bar.o <= tpPrice) {
+          winFirst = true;
+        } else if (bar.o >= slPrice) {
+          winFirst = false;
+        } else if (bar.c <= bar.o) {
+          // Bearish candle: opened, rallied to high, dropped to low, closed
+          winFirst = false;
+        } else {
+          // Bullish candle: opened, dropped to low, rallied to high, closed
+          winFirst = true;
+        }
+
+        if (winFirst) {
+          const diff = Math.abs(entryPrice - tpPrice);
+          return {
+            status: 'WIN',
+            exitTimestamp: bar.t,
+            exitPrice: tpPrice,
+            pnlDiff: diff,
+            pnlAmount: diff * lotSize * contractSize,
+            pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+            barsCount: evaluatedBars,
+            isClosed: true,
+            isProfit: true,
+          };
+        } else {
+          const diff = -Math.abs(slPrice - entryPrice);
+          return {
+            status: 'LOSS',
+            exitTimestamp: bar.t,
+            exitPrice: slPrice,
+            pnlDiff: diff,
+            pnlAmount: diff * lotSize * contractSize,
+            pnlPct: entryPrice > 0 ? (diff / entryPrice) * 100 : 0,
+            barsCount: evaluatedBars,
+            isClosed: true,
+            isProfit: false,
+          };
+        }
+      }
+    }
+  }
+
+  if (evaluatedBars > 0) {
+    const currentPrice = lastCandle.c;
+    const diff = isLong ? (currentPrice - entryPrice) : (entryPrice - currentPrice);
+    const pnlAmount = diff * lotSize * contractSize;
+    const pnlPct = entryPrice > 0 ? (diff / entryPrice) * 100 : 0;
+    return {
+      status: 'OPEN',
+      exitTimestamp: lastCandle.t,
+      exitPrice: currentPrice,
+      currentPrice,
+      pnlDiff: diff,
+      pnlAmount,
+      pnlPct,
+      barsCount: evaluatedBars,
+      isClosed: false,
+      isProfit: diff >= 0,
+    };
+  }
+
+  return {
+    status: 'PLANNED',
+    pnlDiff: 0,
+    pnlPct: 0,
+    barsCount: 0,
+    isClosed: false,
+    isProfit: false,
+  };
+}
+

@@ -1437,6 +1437,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       canvasHeight: this.canvas.height / this.dpr,
       chartToPixel: (pt) => this.chartToPixel(pt),
       pixelToChart: (x, y) => this.pixelToChart(x, y),
+      candles: this.candleData,
     };
 
     // 1. Position overlay (close buttons / SL-TP drag handles)
@@ -1817,6 +1818,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       canvasHeight: this.canvas.height / this.dpr,
       chartToPixel: (pt) => this.chartToPixel(pt),
       pixelToChart: (x, y) => this.pixelToChart(x, y),
+      candles: this.candleData,
     };
 
     const posMoveState = this.positionOverlay.handlePointerMove(pos.x, pos.y, renderCtx);
@@ -2514,6 +2516,7 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       chartToPixel: (pt: DrawingPoint) => this.chartToPixel(pt),
       pixelToChart: (x: number, y: number) => this.pixelToChart(x, y),
       getBarStats: (t1, t2, p1, p2) => this.getBarStats(t1, t2, p1, p2),
+      candles: this.candleData,
     };
 
     // 1. Render committed drawings

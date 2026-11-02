@@ -17,6 +17,8 @@ import {
   formatPriceChange,
   getRectangle8Handles,
   smoothFreehandPoints,
+  evaluatePositionPriceAction,
+  type CandleInputRow,
 } from './drawing-math';
 import type { DrawingDefinition, DrawingPoint } from './drawing-types';
 
@@ -27,6 +29,7 @@ export interface RenderContext {
   chartToPixel: (pt: DrawingPoint) => { x: number; y: number } | null;
   pixelToChart: (x: number, y: number) => DrawingPoint | null;
   getBarStats?: (t1: number, t2: number, p1?: number, p2?: number) => { barCount: number; durationText: string; volumeText?: string } | null;
+  candles?: [number, number, number, number, number, number][] | CandleInputRow[];
 }
 
 function resolveBarStats(
@@ -1093,16 +1096,67 @@ export function renderDrawingOnCanvas(
 
         const showStats = isSelected || (d.style.alwaysShowStats ?? false);
 
+        // Precisions and Formattings
+        const precision = d.style.lotPrecision !== undefined
+          ? d.style.lotPrecision
+          : entryPrice > 50 ? 2 : 4;
+        const tpDiff = Math.abs(tpPrice - entryPrice);
+        const slDiff = Math.abs(entryPrice - slPrice);
+
+        // Real price action evaluation against candlestick history
+        const evalResult = evaluatePositionPriceAction(
+          d.type,
+          d.points[0],
+          tpPrice,
+          slPrice,
+          endTimestamp,
+          rc.candles,
+          metrics.symbolSpec?.contractSize ?? 1,
+          lotSize,
+        );
+
         // Determine outcome: Loss if explicit negative PnL or outcome === 'loss'
         const hasExplicitPnL = typeof d.style.closedPnL === 'number';
-        const isClosedLoss = d.style.outcome === 'loss' || (hasExplicitPnL && d.style.closedPnL! < 0);
-        const exitFraction = isClosedLoss ? 0.35 : 0.48;
+        const hasExplicitOutcome = d.style.outcome !== undefined;
+        const hasExplicitExit = typeof d.style.exitTimestamp === 'number';
 
-        const exitPixel = d.style.exitTimestamp
-          ? chartToPixel({ timestamp: d.style.exitTimestamp, price: d.style.exitPrice ?? (isClosedLoss ? slPrice : tpPrice) })
+        let outcomeStatus: 'WIN' | 'LOSS' | 'OPEN' | 'PLANNED';
+        let pnlVal: number;
+        let exitTimestamp: number | undefined;
+        let exitPriceVal: number | undefined;
+
+        if (hasExplicitPnL || hasExplicitOutcome || hasExplicitExit) {
+          const isLoss = d.style.outcome === 'loss' || (hasExplicitPnL && d.style.closedPnL! < 0);
+          outcomeStatus = isLoss ? 'LOSS' : 'WIN';
+          pnlVal = hasExplicitPnL ? d.style.closedPnL! : (isLoss ? -slDiff : tpDiff);
+          exitTimestamp = d.style.exitTimestamp;
+          exitPriceVal = d.style.exitPrice ?? (isLoss ? slPrice : tpPrice);
+        } else if (rc.candles && rc.candles.length > 0) {
+          outcomeStatus = evalResult.status;
+          pnlVal = evalResult.pnlDiff;
+          exitTimestamp = evalResult.exitTimestamp;
+          exitPriceVal = evalResult.exitPrice;
+        } else {
+          // Standalone renderer fallback (no candles provided, e.g. mock test context)
+          outcomeStatus = 'WIN';
+          pnlVal = tpDiff;
+          exitPriceVal = tpPrice;
+        }
+
+        const isClosedLoss = outcomeStatus === 'LOSS';
+        const isClosedWin = outcomeStatus === 'WIN';
+        const isOpen = outcomeStatus === 'OPEN';
+        const isPlanned = outcomeStatus === 'PLANNED';
+
+        const exitPixel = exitTimestamp
+          ? chartToPixel({ timestamp: exitTimestamp, price: exitPriceVal ?? (isClosedLoss ? slPrice : tpPrice) })
           : null;
-        const splitX = exitPixel ? Math.min(rightX, Math.max(leftX, exitPixel.x)) : (leftX + width * exitFraction);
-        const exitY = exitPixel ? exitPixel.y : (isClosedLoss ? slY : tpY);
+        const splitX = exitPixel
+          ? Math.min(rightX, Math.max(leftX, exitPixel.x))
+          : (isPlanned ? rightX : leftX + width * (isClosedLoss ? 0.35 : 0.48));
+        const exitY = exitPixel
+          ? exitPixel.y
+          : (isClosedLoss ? slY : tpY);
         const wActive = Math.max(1, splitX - leftX);
         const wProj = Math.max(0, rightX - splitX);
 
@@ -1110,7 +1164,14 @@ export function renderDrawingOnCanvas(
         const topProfitY = Math.min(entryY, tpY);
         const profitHeight = Math.max(2, Math.abs(tpY - entryY));
 
-        const tpActiveOpacity = isClosedLoss ? targetOpacity * 0.75 : Math.min(0.8, targetOpacity * 1.6);
+        const tpActiveOpacity = isPlanned
+          ? targetOpacity
+          : isClosedWin
+            ? Math.min(0.8, targetOpacity * 1.6)
+            : isClosedLoss
+              ? targetOpacity * 0.75
+              : (pnlVal >= 0 ? Math.min(0.8, targetOpacity * 1.3) : targetOpacity * 0.75);
+
         ctx.fillStyle = colorWithOpacity(targetColor, tpActiveOpacity);
         ctx.fillRect(leftX, topProfitY, wActive, profitHeight);
         if (wProj > 0) {
@@ -1125,7 +1186,14 @@ export function renderDrawingOnCanvas(
         const topLossY = Math.min(entryY, slY);
         const lossHeight = Math.max(2, Math.abs(slY - entryY));
 
-        const slActiveOpacity = isClosedLoss ? Math.min(0.8, stopOpacity * 1.6) : stopOpacity * 0.75;
+        const slActiveOpacity = isPlanned
+          ? stopOpacity
+          : isClosedLoss
+            ? Math.min(0.8, stopOpacity * 1.6)
+            : isClosedWin
+              ? stopOpacity * 0.75
+              : (pnlVal < 0 ? Math.min(0.8, stopOpacity * 1.3) : stopOpacity * 0.75);
+
         ctx.fillStyle = colorWithOpacity(stopColor, slActiveOpacity);
         ctx.fillRect(leftX, topLossY, wActive, lossHeight);
         if (wProj > 0) {
@@ -1145,22 +1213,18 @@ export function renderDrawingOnCanvas(
         ctx.stroke();
 
         // 4. Subtle Dashed Trade Trajectory Line (from entry to exit point)
-        ctx.save();
-        ctx.strokeStyle = 'rgba(160, 165, 175, 0.75)';
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(leftX, entryY);
-        ctx.lineTo(splitX, exitY);
-        ctx.stroke();
-        ctx.restore();
+        if (!isPlanned && (exitPixel || isClosedWin || isClosedLoss || isOpen)) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(160, 165, 175, 0.75)';
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(leftX, entryY);
+          ctx.lineTo(splitX, exitY);
+          ctx.stroke();
+          ctx.restore();
+        }
 
-        // Precisions and Formattings
-        const precision = d.style.lotPrecision !== undefined
-          ? d.style.lotPrecision
-          : entryPrice > 50 ? 2 : 4;
-        const tpDiff = Math.abs(tpPrice - entryPrice);
-        const slDiff = Math.abs(entryPrice - slPrice);
         const tpDiffStr = tpDiff.toFixed(precision);
         const slDiffStr = slDiff.toFixed(precision);
         const tpPctStr = tpPct.toFixed(3);
@@ -1211,16 +1275,13 @@ export function renderDrawingOnCanvas(
 
         // 7. Center Summary Card (with White Border & Dynamic Outcome Fill)
         if (showStats) {
-          const pnlVal = hasExplicitPnL
-            ? d.style.closedPnL!
-            : isClosedLoss
-              ? -slDiff
-              : tpDiff;
           const pnlStr = pnlVal >= 0 ? pnlVal.toFixed(precision) : `-${Math.abs(pnlVal).toFixed(precision)}`;
           const qtyStr = d.style.qty !== undefined
             ? d.style.qty.toString()
             : (lotSize >= 1 ? lotSize.toFixed(0) : lotSize.toFixed(2));
-          const cardBg = pnlVal >= 0 ? targetColor : stopColor;
+          const cardBg = isPlanned
+            ? (d.style.color || '#2962ff')
+            : (pnlVal >= 0 ? targetColor : stopColor);
 
           const isCompact = d.style.compactStats ?? false;
           const cardW = isCompact ? 160 : 200;
@@ -1239,15 +1300,29 @@ export function renderDrawingOnCanvas(
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
+          const labelPrefix = isOpen ? 'Open PnL' : 'Closed PnL';
+
           if (isCompact) {
             ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
-            ctx.fillText(`Closed PnL: ${pnlStr} · R:R ${rrRatio}`, centerX, entryY);
+            if (isPlanned) {
+              ctx.fillText(`R:R ${rrRatio}`, centerX, entryY);
+            } else {
+              ctx.fillText(`${labelPrefix}: ${pnlStr} · R:R ${rrRatio}`, centerX, entryY);
+            }
           } else {
-            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
-            ctx.fillText(`Closed PnL: ${pnlStr}, Qty: ${qtyStr}`, centerX, cardY + 13);
+            if (isPlanned) {
+              ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+              ctx.fillText(`Qty: ${qtyStr}`, centerX, cardY + 13);
 
-            ctx.font = '500 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
-            ctx.fillText(`Risk/reward ratio: ${rrRatio}`, centerX, cardY + 28);
+              ctx.font = '500 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+              ctx.fillText(`Risk/reward ratio: ${rrRatio}`, centerX, cardY + 28);
+            } else {
+              ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+              ctx.fillText(`${labelPrefix}: ${pnlStr}, Qty: ${qtyStr}`, centerX, cardY + 13);
+
+              ctx.font = '500 11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
+              ctx.fillText(`Risk/reward ratio: ${rrRatio}`, centerX, cardY + 28);
+            }
 
             if (isMarginExceeded) {
               ctx.fillStyle = '#fffb00';
