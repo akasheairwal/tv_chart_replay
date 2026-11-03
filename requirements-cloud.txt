@@ -1,0 +1,13 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7
+pydantic-settings>=2.3
+polars>=1.0
+numpy>=2.0
+pandas>=2.2
+pyarrow>=16.0
+yfinance>=0.2.40
+dukascopy-python>=4.0.1
+requests>=2.31
+websockets>=13.0
+

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +38,34 @@ class BridgeEventRelay(QObject):
     """Thread-safe Python -> JS event relay.
 
     Emitted from download worker threads; Qt queues delivery to the main
-    thread where the QWebChannel transport lives.
+    thread where the QWebChannel transport lives. Also supports direct listeners
+    for FastAPI / WebSocket streaming.
     """
 
     eventEmitted = Signal(str, str)  # (event_name, json_payload)
 
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._listeners: list[Callable[[str, Any], None]] = []
+
+    def add_listener(self, listener: Callable[[str, Any], None]) -> None:
+        if listener not in self._listeners:
+            self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[str, Any], None]) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
     def emit_event(self, name: str, payload: dict) -> None:
-        self.eventEmitted.emit(name, serialize_payload(payload))
+        try:
+            self.eventEmitted.emit(name, serialize_payload(payload))
+        except Exception as exc:
+            logger.debug("Qt signal emission skipped or failed: %s", exc)
+        for listener in list(self._listeners):
+            try:
+                listener(name, payload)
+            except Exception as exc:
+                logger.warning("Event listener failed for %s: %s", name, exc)
 
 
 @dataclass

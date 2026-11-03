@@ -80,7 +80,7 @@ export class App {
   private activeSymbol = '';
   private activeTimeframe = '1H';
 
-  constructor(private readonly bridge: PythonBridge | null) {
+  constructor(private bridge: PythonBridge | null) {
     this.sessionMgr = new SessionManager(bridge);
     this.chart = new ChartManager(
       requireElement('#chart-container'),
@@ -349,6 +349,17 @@ export class App {
 
     // Check for autosave on startup
     void this.checkAutosave();
+  }
+
+  /**
+   * Dynamically attach a connected Python bridge (e.g. when Render cloud backend finishes waking up).
+   */
+  attachBridge(bridge: PythonBridge): void {
+    this.bridge = bridge;
+    this.subscribeBridgeEvents();
+    if (this.activeSymbol) {
+      void this.requestDataAndLoadHistory();
+    }
   }
 
   private panelTransitionTimer: ReturnType<typeof setTimeout> | null = null;

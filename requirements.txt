@@ -12,6 +12,11 @@ yfinance>=0.2.40
 dukascopy-python>=4.0.1
 requests>=2.31
 
+# Cloud API / Transport Adapter
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=13.0
+
 # Dev / test
 pytest>=8.0
 ruff>=0.5
