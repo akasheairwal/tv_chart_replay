@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from PySide6.QtCore import QObject, Signal, Slot
+from app.compat import QObject, Signal, Slot
 
 from app.bridge.events import json_default, serialize_payload
 

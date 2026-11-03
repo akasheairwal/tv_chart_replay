@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QTimer
+from app.compat import QObject, QTimer
 
 
 class ReplayClock(QObject):

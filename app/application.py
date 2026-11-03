@@ -10,7 +10,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from PySide6.QtCore import QObject, Signal
+from app.compat import QObject, Signal
 
 from app.bridge.events import serialize_payload
 from app.config.paths import Paths, get_paths

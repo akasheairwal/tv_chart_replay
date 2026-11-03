@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import polars as pl
-from PySide6.QtCore import QObject
+from app.compat import QObject
 
 from app.data.models.symbol import Symbol
 from app.data.models.timeframe import Timeframe
