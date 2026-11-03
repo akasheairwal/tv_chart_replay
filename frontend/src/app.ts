@@ -22,6 +22,8 @@ import { TradingDrawer } from './ui/trading-drawer';
 import { Watchlist } from './ui/watchlist';
 import { SlTpConfirmDialog, type SlTpModificationRequest } from './ui/sl-tp-confirm-dialog';
 import { PartialCloseDialog, type PartialCloseRequest } from './ui/partial-close-dialog';
+import { ChartContextMenu } from './ui/chart-context-menu';
+import { ChartCornerSettingsPopup } from './ui/chart-corner-settings';
 import type { PositionDefinition } from './trading/trading-types';
 
 interface RequestResponse {
@@ -77,6 +79,8 @@ export class App {
   private tradingDrawer: TradingDrawer | null = null;
   private slTpConfirmDialog: SlTpConfirmDialog | null = null;
   private partialCloseDialog: PartialCloseDialog | null = null;
+  private chartContextMenu: ChartContextMenu | null = null;
+  private chartCornerSettings: ChartCornerSettingsPopup | null = null;
   private activeSymbol = '';
   private activeTimeframe = '1H';
 
@@ -242,6 +246,46 @@ export class App {
       (order) => this.handleOrderPlacement(order),
     );
 
+    // Right-Click Context Menu on Chart (ADR 0007)
+    this.chartContextMenu = new ChartContextMenu({
+      container: chartContainer,
+      onResetChartView: () => {
+        this.chart.resetChartView();
+        this.updateStatusBar('Chart view reset');
+      },
+      onOpenChartSettings: () => {
+        this.indicatorDialog.show();
+      },
+      onRemoveAllDrawings: () => {
+        this.chart.getDrawingEngine()?.clearAll();
+        this.updateStatusBar('All drawings removed');
+      },
+      onRemoveAllIndicators: () => {
+        const active = this.indicatorManager.getActive();
+        for (const ind of active) {
+          this.indicatorManager.removeIndicator(ind.id);
+        }
+        this.updateStatusBar('All indicators removed');
+      },
+    });
+
+    // Bottom-Right Corner Settings Icon & Floating Popup (ADR 0007)
+    this.chartCornerSettings = new ChartCornerSettingsPopup({
+      chartContainer,
+      chartManager: this.chart,
+      onResetChartView: () => {
+        this.chart.resetChartView();
+        this.updateStatusBar('Chart view reset');
+      },
+      onOpenChartSettings: () => {
+        this.indicatorDialog.show();
+      },
+      onRemoveAllDrawings: () => {
+        this.chart.getDrawingEngine()?.clearAll();
+        this.updateStatusBar('All drawings removed');
+      },
+    });
+
     // Right Side Collapsible Trade Panel
     const tradePanelContainer = requireElement('#trade-panel');
     this.orderPanel = new OrderPanel(
@@ -349,6 +393,22 @@ export class App {
 
     // Check for autosave on startup
     void this.checkAutosave();
+  }
+
+  getChartContextMenu(): ChartContextMenu | null {
+    return this.chartContextMenu;
+  }
+
+  getChartCornerSettings(): ChartCornerSettingsPopup | null {
+    return this.chartCornerSettings;
+  }
+
+  destroy(): void {
+    this.chartContextMenu?.destroy();
+    this.chartContextMenu = null;
+    this.chartCornerSettings?.destroy();
+    this.chartCornerSettings = null;
+    this.chart.destroy();
   }
 
   private panelTransitionTimer: ReturnType<typeof setTimeout> | null = null;
@@ -942,6 +1002,11 @@ export class App {
         if (state) {
           void this.replayController.jumpTo(state.end_index);
         }
+      } else if (e.code === 'KeyR' && e.altKey && !e.ctrlKey && !e.metaKey) {
+        // Reset chart view (TradingView shortcut Alt + R - ADR 0007)
+        e.preventDefault();
+        this.chart.resetChartView();
+        this.updateStatusBar('Chart view reset');
       } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void this.startRandomReplay();
@@ -954,6 +1019,13 @@ export class App {
         this.watchlist?.toggleCollapse();
       }
     });
+  }
+
+  private updateStatusBar(message: string): void {
+    const statusBar = document.getElementById('status-bar');
+    if (statusBar) {
+      statusBar.textContent = message;
+    }
   }
 
   private subscribeBridgeEvents(): void {

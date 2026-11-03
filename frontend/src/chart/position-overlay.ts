@@ -205,8 +205,7 @@ export class PositionOverlay {
 
     ctx.save();
 
-    const priceScaleWidth = 85;
-    const rightBoundary = Math.max(50, w - priceScaleWidth);
+    const rightBoundary = Math.max(50, w - 8);
 
     for (let i = 0; i < activePositions.length; i++) {
       const pos = activePositions[i];

@@ -224,7 +224,8 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'drawing-canvas-overlay';
     this.canvas.style.position = 'absolute';
-    this.canvas.style.inset = '0';
+    this.canvas.style.left = '0';
+    this.canvas.style.top = '0';
     this.canvas.style.pointerEvents = 'none';
     this.canvas.style.zIndex = '5';
     this.container.style.position = 'relative';
@@ -852,14 +853,48 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     return typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
   }
 
-  resize(): void {
-    const dpr = this.dpr;
+  getPaneBounds(): { width: number; height: number } {
     const w = this.container.clientWidth || 800;
     const h = this.container.clientHeight || 500;
-    this.canvas.width = w * dpr;
-    this.canvas.height = h * dpr;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    let priceScaleWidth = 0;
+    let timeScaleHeight = 0;
+
+    try {
+      if (this.chart) {
+        priceScaleWidth = this.chart.priceScale('right')?.width?.() ?? 0;
+        timeScaleHeight = this.chart.timeScale?.()?.height?.() ?? 0;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (priceScaleWidth <= 0) {
+      const stub = typeof this.container?.querySelector === 'function'
+        ? this.container.querySelector('tr:first-child td:last-child')
+        : null;
+      priceScaleWidth = stub && (stub as HTMLElement).clientWidth > 0 ? (stub as HTMLElement).clientWidth : 65;
+    }
+
+    if (timeScaleHeight <= 0) {
+      const stub = typeof this.container?.querySelector === 'function'
+        ? this.container.querySelector('tr:last-child td:first-child')
+        : null;
+      timeScaleHeight = stub && (stub as HTMLElement).clientHeight > 0 ? (stub as HTMLElement).clientHeight : 26;
+    }
+
+    const paneWidth = Math.max(0, w - priceScaleWidth);
+    const paneHeight = Math.max(0, h - timeScaleHeight);
+
+    return { width: paneWidth, height: paneHeight };
+  }
+
+  resize(): void {
+    const dpr = this.dpr;
+    const { width: paneWidth, height: paneHeight } = this.getPaneBounds();
+    this.canvas.width = paneWidth * dpr;
+    this.canvas.height = paneHeight * dpr;
+    this.canvas.style.width = `${paneWidth}px`;
+    this.canvas.style.height = `${paneHeight}px`;
     if (this.ctx && typeof this.ctx.scale === 'function') {
       this.ctx.scale(dpr, dpr);
     }
@@ -2649,9 +2684,35 @@ export class DrawingEngine implements IDrawingShortcutTarget {
       this.redrawRafId = null;
     }
     if (!this.ctx) return; // headless/test environments without 2d context
-    const w = this.canvas.width / this.dpr;
-    const h = this.canvas.height / this.dpr;
+
+    const { width: paneWidth, height: paneHeight } = this.getPaneBounds();
+    const dpr = this.dpr;
+
+    if (
+      this.canvas.style.width !== `${paneWidth}px` ||
+      this.canvas.style.height !== `${paneHeight}px`
+    ) {
+      this.canvas.width = paneWidth * dpr;
+      this.canvas.height = paneHeight * dpr;
+      this.canvas.style.width = `${paneWidth}px`;
+      this.canvas.style.height = `${paneHeight}px`;
+      if (typeof this.ctx.scale === 'function') {
+        this.ctx.scale(dpr, dpr);
+      }
+    }
+
+    const w = this.canvas.width / dpr;
+    const h = this.canvas.height / dpr;
     this.ctx.clearRect(0, 0, w, h);
+
+    // Strictly clip drawing area so drawings NEVER bleed into price scale or time scale
+    const canClip = typeof this.ctx.rect === 'function' && typeof this.ctx.clip === 'function';
+    if (canClip) {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(0, 0, w, h);
+      this.ctx.clip();
+    }
 
     const rc: RenderContext = {
       ctx: this.ctx as CanvasRenderingContext2D,
@@ -2695,6 +2756,10 @@ export class DrawingEngine implements IDrawingShortcutTarget {
     // 4. Render full-canvas crosshair extending vertically & horizontally for all drawing tools
     if (this.currentTool !== 'cursor' && this.crosshairPos) {
       renderFullCrosshair(this.crosshairPos, this.currentSymbol, this.currentTimeframe, rc);
+    }
+
+    if (canClip) {
+      this.ctx.restore();
     }
   }
 
