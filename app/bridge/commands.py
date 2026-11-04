@@ -710,6 +710,23 @@ class BridgeCommandHandler(QObject):
         def action():
             if self._services is None or not hasattr(self._services, "order_engine"):
                 return {}
+            user_id = None
+            if payload_json and payload_json.startswith("{"):
+                try:
+                    data = json.loads(payload_json)
+                    user_id = data.get("user_id")
+                    if not user_id and data.get("token") and hasattr(self._services, "auth_service"):
+                        u = self._services.auth_service.authenticate_token(data["token"])
+                        if u:
+                            user_id = u.id
+                except Exception:
+                    pass
+            if user_id and hasattr(self._services, "user_repo"):
+                u = self._services.user_repo.get_by_id(user_id)
+                if u and hasattr(self._services, "order_engine"):
+                    self._services.order_engine.account.balance = u.balance
+                    self._services.order_engine.account.update_totals()
+
             return self._services.order_engine.get_account_summary()
 
         return self._envelope(action)
@@ -789,6 +806,7 @@ class BridgeCommandHandler(QObject):
             balance = 10000.0
             user_id = None
             is_demo = False
+            clear_journal = False
             if isinstance(initial_balance_or_json, (int, float)):
                 balance = float(initial_balance_or_json)
             elif isinstance(initial_balance_or_json, str) and initial_balance_or_json:
@@ -800,9 +818,49 @@ class BridgeCommandHandler(QObject):
                         balance = float(parsed.get("initial_balance", 10000.0))
                         user_id = parsed.get("user_id")
                         is_demo = bool(parsed.get("is_demo", False))
+                        clear_journal = bool(parsed.get("clear_journal", False))
                 except (ValueError, TypeError, json.JSONDecodeError):
                     pass
-            summary = self._services.order_engine.reset_account(balance, user_id=user_id, is_demo=is_demo)
+            summary = self._services.order_engine.reset_account(
+                balance, user_id=user_id, is_demo=is_demo, clear_journal=clear_journal
+            )
+            return summary.to_dict()
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    @Slot(float, result=str)
+    @Slot(result=str)
+    def addAccountBalance(self, payload_or_json: Any = 1000.0) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "order_engine"):
+                raise RuntimeError("order engine unavailable")
+            amount = 1000.0
+            user_id = None
+            is_demo = False
+            note = ""
+            if isinstance(payload_or_json, (int, float)):
+                amount = float(payload_or_json)
+            elif isinstance(payload_or_json, str) and payload_or_json:
+                try:
+                    parsed = json.loads(payload_or_json)
+                    if isinstance(parsed, (int, float)):
+                        amount = float(parsed)
+                    elif isinstance(parsed, dict):
+                        amount = float(parsed.get("amount", 1000.0))
+                        user_id = parsed.get("user_id")
+                        is_demo = bool(parsed.get("is_demo", False))
+                        note = str(parsed.get("note", ""))
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    pass
+            summary = self._services.order_engine.add_balance(
+                amount, user_id=user_id, is_demo=is_demo, note=note
+            )
+            if user_id and hasattr(self._services, "auth_service"):
+                try:
+                    self._services.auth_service.add_balance(user_id, amount)
+                except Exception:
+                    pass
             return summary.to_dict()
 
         return self._envelope(action)
@@ -896,10 +954,36 @@ class BridgeCommandHandler(QObject):
             if user is None:
                 raise ValueError("Unauthorized or session expired")
             init_bal = data.get("initial_balance")
+            clear_journal = bool(data.get("clear_journal", False))
             target_bal = float(init_bal) if init_bal is not None else None
             new_bal = self._services.auth_service.reset_account(user.id, target_bal)
             if hasattr(self._services, "order_engine"):
-                self._services.order_engine.reset_account(new_bal, user_id=user.id, is_demo=False)
+                self._services.order_engine.reset_account(
+                    new_bal, user_id=user.id, is_demo=False, clear_journal=clear_journal
+                )
+            return {"balance": new_bal}
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    def authAddBalance(self, payload_json: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "auth_service"):
+                raise RuntimeError("auth service unavailable")
+            data = json.loads(payload_json) if payload_json.startswith("{") else {}
+            token = data.get("token", "")
+            user = self._services.auth_service.authenticate_token(token)
+            if user is None:
+                raise ValueError("Unauthorized or session expired")
+            amount = float(data.get("amount", 1000.0))
+            if amount <= 0:
+                raise ValueError("Deposit amount must be positive")
+            note = str(data.get("note", ""))
+            new_bal = self._services.auth_service.add_balance(user.id, amount)
+            if hasattr(self._services, "order_engine"):
+                self._services.order_engine.add_balance(
+                    amount, user_id=user.id, is_demo=False, note=note
+                )
             return {"balance": new_bal}
 
         return self._envelope(action)

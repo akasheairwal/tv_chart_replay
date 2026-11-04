@@ -104,6 +104,10 @@ class AuthService:
         """Resets a user's paper balance."""
         return self.user_repo.reset_balance(user_id, target_balance)
 
+    def add_balance(self, user_id: str, amount: float) -> float:
+        """Adds funds to a user's paper balance."""
+        return self.user_repo.add_balance(user_id, amount)
+
     @staticmethod
     def _clean_token(token: str) -> str:
         tok = token.strip()

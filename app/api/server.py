@@ -271,8 +271,39 @@ async def auth_reset_account(request: Request):
     except Exception:
         body = {}
     init_bal = body.get("initial_balance")
+    clear_journal = bool(body.get("clear_journal", False))
     new_bal = ctx.auth_service.reset_account(user.id, float(init_bal) if init_bal is not None else None)
-    ctx.order_engine.reset_account(new_bal, user_id=user.id, is_demo=False)
+    ctx.order_engine.reset_account(new_bal, user_id=user.id, is_demo=False, clear_journal=clear_journal)
+    return {"ok": True, "data": {"balance": new_bal}}
+
+
+@app.post("/api/auth/add-balance")
+async def auth_add_balance(request: Request):
+    ctx = get_context()
+    user = get_current_user(request)
+    if user is None:
+        return Response(
+            content=json.dumps({"ok": False, "error": "UNAUTHENTICATED"}),
+            status_code=401,
+            media_type="application/json",
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        amount = float(body.get("amount", 1000.0))
+        if amount <= 0:
+            raise ValueError()
+    except (ValueError, TypeError):
+        return Response(
+            content=json.dumps({"ok": False, "error": "INVALID_AMOUNT", "message": "Deposit amount must be positive"}),
+            status_code=400,
+            media_type="application/json",
+        )
+    note = str(body.get("note", ""))
+    new_bal = ctx.auth_service.add_balance(user.id, amount)
+    ctx.order_engine.add_balance(amount, user_id=user.id, is_demo=False, note=note)
     return {"ok": True, "data": {"balance": new_bal}}
 
 
@@ -318,7 +349,7 @@ async def dispatch_command(command: str, request: Request):
         except (json.JSONDecodeError, ValueError):
             pass
 
-    elif command in ("getTradeJournal", "getOpenPositions", "getPendingOrders", "resetAccount"):
+    elif command in ("getAccountSummary", "getTradeJournal", "getOpenPositions", "getPendingOrders", "resetAccount", "addAccountBalance"):
         try:
             data = json.loads(body_str) if (body_str and body_str.startswith("{")) else {}
             user = get_current_user(request)

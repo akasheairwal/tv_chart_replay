@@ -76,7 +76,20 @@ class OrderEngine:
         clear_journal: bool = False,
     ) -> AccountSummary:
         with self._lock:
-            self.account = AccountSummary(balance=initial_balance, equity=initial_balance, free_margin=initial_balance)
+            init_bal = float(initial_balance)
+            prev_trades = self.account.total_trades if not clear_journal else 0
+            prev_winning = self.account.winning_trades if not clear_journal else 0
+            prev_losing = self.account.losing_trades if not clear_journal else 0
+            prev_realized = self.account.realized_pnl if not clear_journal else 0.0
+            self.account = AccountSummary(
+                balance=init_bal,
+                equity=init_bal,
+                free_margin=init_bal,
+                total_trades=prev_trades,
+                winning_trades=prev_winning,
+                losing_trades=prev_losing,
+                realized_pnl=prev_realized,
+            )
             if is_demo:
                 self.orders = {k: v for k, v in self.orders.items() if not v.is_demo}
                 self.positions = {k: v for k, v in self.positions.items() if not v.is_demo}
@@ -99,6 +112,28 @@ class OrderEngine:
         if self.emit:
             self.emit("trading.account", self.get_account_summary())
             self.emit("trading.positions", self.get_open_positions())
+        return res
+
+    def add_balance(
+        self,
+        amount: float,
+        user_id: str | None = None,
+        is_demo: bool = False,
+        note: str = "",
+    ) -> AccountSummary:
+        """Add funds to the paper trading account balance (deposit simulation)."""
+        with self._lock:
+            amount_float = float(amount)
+            if amount_float <= 0:
+                raise ValueError("Deposit amount must be positive")
+            self.account.balance = round(self.account.balance + amount_float, 2)
+            total_unrealized = sum(p.unrealized_pnl for p in self.positions.values() if p.status == "OPEN")
+            self.account.unrealized_pnl = total_unrealized
+            self.account.update_totals()
+            res = self.account
+
+        if self.emit:
+            self.emit("trading.account", self.get_account_summary())
         return res
 
     def place_order(

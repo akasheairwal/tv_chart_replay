@@ -152,6 +152,18 @@ class UserRepository:
         self._conn.commit()
         return reset_val
 
+    def add_balance(self, user_id: str, amount: float) -> float:
+        """Adds funds to a user's paper trading balance."""
+        user = self.get_by_id(user_id)
+        if user is None:
+            raise ValueError(f"User '{user_id}' not found")
+        amt = float(amount)
+        if amt <= 0:
+            raise ValueError("Deposit amount must be positive")
+        new_balance = round(user.balance + amt, 2)
+        self.update_balance(user_id, new_balance)
+        return new_balance
+
     def update_last_login(self, user_id: str) -> None:
         """Updates the last_login_at timestamp to now."""
         self._conn.execute(
