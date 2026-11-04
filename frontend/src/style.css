@@ -1469,16 +1469,17 @@ body {
    =================================================================== */
 
 .replay-bar.tv-replay-theme {
-  height: 42px;
+  height: 38px;
   background: var(--tv-panel);
   border-top: 1px solid var(--tv-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
-  gap: 12px;
+  padding: 0 12px;
+  gap: 10px;
   user-select: none;
   z-index: 30;
+  box-sizing: border-box;
 }
 
 .replay-group {
@@ -1487,19 +1488,37 @@ body {
   gap: 6px;
 }
 
+.replay-group.transport-group {
+  gap: 5px;
+}
+
+.replay-group.timeline-group {
+  gap: 8px;
+  border-left: 1px solid var(--tv-border-subtle, #2a2e39);
+  border-right: 1px solid var(--tv-border-subtle, #2a2e39);
+  padding: 0 12px;
+}
+
+.replay-group.engine-group {
+  gap: 6px;
+}
+
 .replay-btn {
+  width: 30px;
+  height: 30px;
   background: var(--tv-bg);
   color: var(--tv-fg);
   border: 1px solid var(--tv-border);
   border-radius: 6px;
-  padding: 5px 10px;
+  padding: 0;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  transition: all 0.15s ease;
+  justify-content: center;
+  transition: all 0.12s cubic-bezier(0, 0, 0.2, 1);
+  flex-shrink: 0;
 }
 
 .replay-btn * {
@@ -1513,6 +1532,8 @@ body {
 }
 
 .replay-play-btn {
+  width: 32px;
+  height: 30px;
   background: var(--tv-accent-bg);
   border-color: var(--tv-accent);
   color: #60a5fa;
@@ -1522,6 +1543,8 @@ body {
 .replay-play-btn.playing {
   background: var(--tv-accent);
   color: #ffffff;
+  border-color: var(--tv-accent);
+  box-shadow: 0 0 8px rgba(41, 98, 255, 0.4);
 }
 
 .replay-random-btn {
@@ -1533,6 +1556,18 @@ body {
 .replay-random-btn:hover {
   background: var(--exness-yellow);
   color: #131722;
+  box-shadow: 0 0 6px rgba(255, 183, 3, 0.35);
+}
+
+.replay-btn.replay-jump-btn {
+  width: auto;
+  padding: 0 8px;
+  gap: 4px;
+}
+
+.replay-btn.replay-jump-btn .replay-btn-text {
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 .replay-speed-wrap {
@@ -1700,14 +1735,404 @@ body {
   color: rgba(41, 98, 255, 0.85);
 }
 
+/* TradingView Replay Jump to Date Popup */
+.tv-jump-popup {
+  position: fixed;
+  background: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  padding: 12px;
+  width: 270px;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: tvSpeedFadeUp 0.12s cubic-bezier(0, 0, 0.2, 1);
+  z-index: 1000;
+}
+
+.tv-jump-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #2a2e39;
+  padding-bottom: 8px;
+}
+
+.tv-jump-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #d1d4dc;
+}
+
+.tv-jump-title-icon {
+  display: flex;
+  align-items: center;
+  color: #2962ff;
+}
+
+.tv-jump-close-btn {
+  background: transparent;
+  border: none;
+  color: #787b86;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.tv-jump-close-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tv-jump-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #787b86;
+  margin-bottom: 6px;
+}
+
+.tv-jump-presets-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.tv-jump-preset-btn {
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 4px;
+  color: #b2b5be;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-align: center;
+}
+
+.tv-jump-preset-btn:hover {
+  background: rgba(41, 98, 255, 0.12);
+  border-color: #2962ff;
+  color: #ffffff;
+}
+
+.tv-jump-input-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-jump-popup-input {
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color 0.15s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.tv-jump-popup-input:focus {
+  border-color: #2962ff;
+}
+
+.tv-jump-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #2a2e39;
+}
+
+.tv-jump-cancel-btn {
+  background: transparent;
+  border: 1px solid #2a2e39;
+  border-radius: 4px;
+  color: #b2b5be;
+  font-size: 11.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.tv-jump-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.tv-jump-submit-btn {
+  background: #2962ff;
+  border: 1px solid #2962ff;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.12s ease;
+}
+
+.tv-jump-submit-btn:hover {
+  background: #1e4bd8;
+  border-color: #1e4bd8;
+}
+
+.replay-btn.replay-jump-btn.open {
+  background: rgba(41, 98, 255, 0.15);
+  border-color: var(--tv-accent, #2962ff);
+  color: #60a5fa;
+}
+
+/* TradingView Replay Formation Mode Popup */
+.tv-formation-popup {
+  position: fixed;
+  background: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  padding: 12px;
+  width: 320px;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: tvSpeedFadeUp 0.12s cubic-bezier(0, 0, 0.2, 1);
+  z-index: 1000;
+}
+
+.tv-formation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #2a2e39;
+  padding-bottom: 8px;
+}
+
+.tv-formation-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #d1d4dc;
+}
+
+.tv-formation-title-icon {
+  display: flex;
+  align-items: center;
+  color: #2962ff;
+}
+
+.tv-formation-close-btn {
+  background: transparent;
+  border: none;
+  color: #787b86;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.tv-formation-close-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tv-formation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tv-formation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.tv-formation-item:hover {
+  border-color: #363c4e;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tv-formation-item.active {
+  border-color: #2962ff;
+  background: rgba(41, 98, 255, 0.1);
+}
+
+.tv-formation-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-formation-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid #787b86;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tv-formation-item.active .tv-formation-radio {
+  border-color: #2962ff;
+}
+
+.tv-formation-radio-inner {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.tv-formation-item.active .tv-formation-radio-inner {
+  background: #2962ff;
+}
+
+.tv-formation-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tv-formation-desc {
+  font-size: 11px;
+  color: #787b86;
+  line-height: 1.35;
+  margin-left: 22px;
+}
+
+.tv-formation-diag {
+  font-size: 10.5px;
+  margin-left: 22px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+}
+
+.tv-formation-diag.diag-active {
+  background: rgba(38, 166, 154, 0.16);
+  color: #26a69a;
+  border: 1px solid rgba(38, 166, 154, 0.35);
+}
+
+.tv-formation-diag.diag-fallback {
+  background: rgba(255, 152, 0, 0.16);
+  color: #ffa726;
+  border: 1px solid rgba(255, 152, 0, 0.35);
+}
+
+.tv-formation-diag.diag-neutral {
+  background: rgba(120, 123, 134, 0.14);
+  color: #b2b5be;
+  border: 1px solid rgba(120, 123, 134, 0.3);
+}
+
 .replay-mode-wrap {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   background: var(--tv-bg);
   border: 1px solid var(--tv-border);
   border-radius: 6px;
-  padding: 2px 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.replay-mode-wrap:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #363c4e;
+}
+
+.replay-mode-wrap:focus-visible,
+.replay-mode-wrap.open {
+  background: rgba(41, 98, 255, 0.15);
+  border-color: var(--tv-accent, #2962ff);
+  outline: none;
+}
+
+.replay-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.replay-mode-dot.ltf-active {
+  background: #26a69a;
+  box-shadow: 0 0 5px rgba(38, 166, 154, 0.5);
+}
+
+.replay-mode-dot.ltf-fallback {
+  background: #ffa726;
+  box-shadow: 0 0 5px rgba(255, 152, 0, 0.5);
+}
+
+.replay-mode-dot.orderflow {
+  background: #2962ff;
+  box-shadow: 0 0 5px rgba(41, 98, 255, 0.5);
+}
+
+.replay-mode-dot.instant {
+  background: #787b86;
+}
+
+.replay-mode-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tv-fg-bright);
+  line-height: 1;
+}
+
+.replay-mode-chevron {
+  display: flex;
+  align-items: center;
+  color: var(--tv-fg-muted);
+  transition: transform 0.15s ease;
+}
+
+.replay-mode-wrap.open .replay-mode-chevron {
+  transform: rotate(180deg);
 }
 
 .replay-mode-icon {
@@ -1795,9 +2220,11 @@ body {
   font-size: 11.5px;
   color: var(--tv-fg-muted);
   margin: 0 6px;
+  white-space: nowrap;
 }
 
 .replay-badge {
+  display: none; /* Redundant status text hidden in favor of illuminated play button */
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1821,6 +2248,49 @@ body {
   background: var(--tv-accent-bg);
   color: #60a5fa;
   border: 1px solid var(--tv-accent);
+}
+
+/* Responsive adjustments for Replay Bar */
+@media (max-width: 1024px) {
+  .replay-bar.tv-replay-theme {
+    padding: 0 8px;
+    gap: 8px;
+  }
+  .replay-group {
+    gap: 4px;
+  }
+  .replay-group.timeline-group {
+    padding: 0 8px;
+    gap: 6px;
+  }
+  .replay-btn.replay-jump-btn .replay-btn-text {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .replay-group.timeline-group {
+    border-left: none;
+    border-right: none;
+    padding: 0 4px;
+    gap: 4px;
+  }
+  .replay-counter {
+    font-size: 10.5px;
+    margin: 0 2px;
+  }
+  .replay-mode-label {
+    display: none;
+  }
+  .replay-mode-wrap {
+    padding: 3px 6px;
+  }
+}
+
+@media (max-width: 600px) {
+  .replay-counter {
+    display: none;
+  }
 }
 
 /* ===================================================================

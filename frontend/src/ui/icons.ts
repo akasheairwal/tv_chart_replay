@@ -103,6 +103,9 @@ export const ICONS: Record<string, string> = {
   // --- Replay Controls (TradingView bar replay) ---
   play: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>`,
   pause: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`,
+  reset_start: `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><rect x="4" y="5" width="2.5" height="14" rx="0.5"/><polygon points="20 19 9 12 20 5 20 19"/></svg>`,
+  single_step_back: `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><polygon points="16 19 7 12 16 5 16 19"/></svg>`,
+  single_step_forward: `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><polygon points="8 5 17 12 8 19 8 5"/></svg>`,
   step_forward: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"/><rect x="16" y="4" width="3" height="16"/></svg>`,
   step_back: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"/><rect x="5" y="4" width="3" height="16"/></svg>`,
   jump: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,

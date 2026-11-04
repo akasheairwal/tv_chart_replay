@@ -1,6 +1,11 @@
 import type { ReplayController, ReplayState } from './replay-controller';
 import type { FormationMode } from './sub-tick-generator';
 import { getIcon } from '../ui/icons';
+import {
+  positionPopoverAbove,
+  attachPopoverDismissal,
+  type PopoverBinding,
+} from '../ui/popover-utils';
 
 export const REPLAY_SPEEDS = [0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 25, 50, 100];
 
@@ -29,9 +34,17 @@ export class ReplayBar {
   private speedSelect!: HTMLSelectElement;
   private speedPopupEl: HTMLElement | null = null;
   private currentSpeed = 1;
-  private boundOnOutsideClick: ((e: MouseEvent) => void) | null = null;
-  private boundOnKeyDown: ((e: KeyboardEvent) => void) | null = null;
-  private boundOnWindowResize: (() => void) | null = null;
+  private speedPopoverBinding: PopoverBinding | null = null;
+  private jumpPopupEl: HTMLElement | null = null;
+  private jumpPopoverBinding: PopoverBinding | null = null;
+  private currentTimestamp = 0;
+  private boundGlobalKey: ((e: KeyboardEvent) => void) | null = null;
+  private modeWrap!: HTMLElement;
+  private modeDot!: HTMLElement;
+  private modeLabel!: HTMLElement;
+  private modeChevron!: HTMLElement;
+  private formationPopupEl: HTMLElement | null = null;
+  private formationPopoverBinding: PopoverBinding | null = null;
   private modeSelect!: HTMLSelectElement;
   private modeBadge!: HTMLElement;
   private lastMode: FormationMode | null = null;
@@ -50,6 +63,20 @@ export class ReplayBar {
     private readonly onJumpToDate?: (target_s: number) => void,
   ) {
     this.render();
+
+    this.boundGlobalKey = (e: KeyboardEvent) => {
+      if ((e.key === 'j' || e.key === 'J') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const target = e.target as HTMLElement | null;
+        const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+        if (!isInput) {
+          e.preventDefault();
+          this.toggleJumpPopup();
+        }
+      }
+    };
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('keydown', this.boundGlobalKey);
+    }
   }
 
   private render(): void {
@@ -57,29 +84,23 @@ export class ReplayBar {
     this.container.className = 'replay-bar tv-replay-theme';
 
     const leftGroup = document.createElement('div');
-    leftGroup.className = 'replay-group left-group';
-
-    this.randomBtn = document.createElement('button');
-    this.randomBtn.className = 'replay-btn replay-random-btn';
-    this.randomBtn.innerHTML = `${getIcon('lightning')} <span>Random</span>`;
-    this.randomBtn.title = 'Random Replay Start (R)';
-    this.randomBtn.addEventListener('click', () => this.onRandomReplay());
+    leftGroup.className = 'replay-group left-group transport-group';
 
     this.resetBtn = document.createElement('button');
-    this.resetBtn.className = 'replay-btn';
-    this.resetBtn.innerHTML = `${getIcon('step_back')}`;
+    this.resetBtn.className = 'replay-btn replay-reset-btn';
+    this.resetBtn.innerHTML = getIcon('reset_start');
     this.resetBtn.title = 'Reset to Start (Home)';
     this.resetBtn.addEventListener('click', () => void this.controller.reset());
 
     this.stepBackBtn = document.createElement('button');
-    this.stepBackBtn.className = 'replay-btn';
-    this.stepBackBtn.innerHTML = `${getIcon('step_back')} <span>Step</span>`;
+    this.stepBackBtn.className = 'replay-btn replay-step-back-btn';
+    this.stepBackBtn.innerHTML = getIcon('single_step_back');
     this.stepBackBtn.title = 'Step Backward (Left Arrow)';
     this.stepBackBtn.addEventListener('click', () => void this.controller.stepBackward(1));
 
     this.playBtn = document.createElement('button');
     this.playBtn.className = 'replay-btn replay-play-btn';
-    this.playBtn.innerHTML = `${getIcon('play')} <span>Play</span>`;
+    this.playBtn.innerHTML = getIcon('play');
     this.playBtn.title = 'Play / Pause (Space)';
     this.playBtn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -87,21 +108,24 @@ export class ReplayBar {
     });
 
     this.stepFwdBtn = document.createElement('button');
-    this.stepFwdBtn.className = 'replay-btn';
-    this.stepFwdBtn.innerHTML = `<span>Step</span> ${getIcon('step_forward')}`;
+    this.stepFwdBtn.className = 'replay-btn replay-step-fwd-btn';
+    this.stepFwdBtn.innerHTML = getIcon('single_step_forward');
     this.stepFwdBtn.title = 'Step Forward (Right Arrow)';
     this.stepFwdBtn.addEventListener('click', () => void this.controller.stepForward(1));
 
+    this.randomBtn = document.createElement('button');
+    this.randomBtn.className = 'replay-btn replay-random-btn';
+    this.randomBtn.innerHTML = getIcon('lightning');
+    this.randomBtn.title = 'Random Replay Start (R)';
+    this.randomBtn.addEventListener('click', () => this.onRandomReplay());
+
     leftGroup.append(
-      this.randomBtn,
       this.resetBtn,
       this.stepBackBtn,
       this.playBtn,
       this.stepFwdBtn,
+      this.randomBtn,
     );
-
-    const rightGroup = document.createElement('div');
-    rightGroup.className = 'replay-group right-group';
 
     const speedWrap = document.createElement('div');
     speedWrap.className = 'replay-speed-wrap';
@@ -161,12 +185,31 @@ export class ReplayBar {
 
     const modeWrap = document.createElement('div');
     modeWrap.className = 'replay-mode-wrap';
+    safeSetAttr(modeWrap, 'role', 'button');
+    safeSetAttr(modeWrap, 'tabindex', '0');
+    safeSetAttr(modeWrap, 'aria-haspopup', 'true');
+    safeSetAttr(modeWrap, 'aria-expanded', 'false');
     modeWrap.title = 'Candle Formation Simulation Mode';
-    modeWrap.innerHTML = `<span class="replay-mode-icon">${getIcon('activity')}</span>`;
+
+    this.modeDot = document.createElement('span');
+    this.modeDot.className = 'replay-mode-dot ltf-active';
+
+    this.modeLabel = document.createElement('span');
+    this.modeLabel.className = 'replay-mode-label';
+    this.modeLabel.textContent = 'Real LTF';
+
+    this.modeChevron = document.createElement('span');
+    this.modeChevron.className = 'replay-mode-chevron';
+    this.modeChevron.innerHTML = getIcon('chevron_down');
 
     this.modeSelect = document.createElement('select');
     this.modeSelect.className = 'replay-mode-select';
     this.modeSelect.title = 'Candle Formation Simulation Mode';
+    if (this.modeSelect.style) {
+      this.modeSelect.style.display = 'none';
+    }
+    safeSetAttr(this.modeSelect, 'tabindex', '-1');
+    safeSetAttr(this.modeSelect, 'aria-hidden', 'true');
     const MODES: Array<{ value: FormationMode; label: string }> = [
       { value: 'ltf', label: 'Real LTF' },
       { value: 'orderflow', label: 'Order Flow' },
@@ -183,32 +226,58 @@ export class ReplayBar {
       this.controller.setFormationMode(this.modeSelect.value as FormationMode);
       this.updateFormationBadge();
     });
-    modeWrap.appendChild(this.modeSelect);
 
     this.modeBadge = document.createElement('span');
     this.modeBadge.className = 'replay-mode-status-badge';
-    modeWrap.appendChild(this.modeBadge);
+    if (this.modeBadge.style) {
+      this.modeBadge.style.display = 'none';
+    }
+
+    modeWrap.append(
+      this.modeDot,
+      this.modeLabel,
+      this.modeChevron,
+      this.modeSelect,
+      this.modeBadge,
+    );
+    this.modeWrap = modeWrap;
+
+    this.modeWrap.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleFormationPopup();
+    });
+
+    this.modeWrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleFormationPopup();
+      }
+    });
+
     this.updateFormationBadge();
+
+    const centerGroup = document.createElement('div');
+    centerGroup.className = 'replay-group center-group timeline-group';
 
     this.jumpInput = document.createElement('input');
     this.jumpInput.type = 'datetime-local';
     this.jumpInput.className = 'replay-jump-input';
+    if (this.jumpInput.style) {
+      this.jumpInput.style.display = 'none';
+    }
     this.jumpInput.title = 'Select target date and time to jump replay';
 
     this.jumpBtn = document.createElement('button');
     this.jumpBtn.className = 'replay-btn replay-jump-btn';
-    this.jumpBtn.innerHTML = `${getIcon('jump')} <span>Jump</span>`;
-    this.jumpBtn.title = 'Jump replay playback to selected date & time';
-    this.jumpBtn.addEventListener('click', () => {
-      if (!this.jumpInput.value) return;
-      const targetTs = Math.floor(new Date(this.jumpInput.value).getTime() / 1000);
-      if (!isNaN(targetTs) && targetTs > 0) {
-        if (this.onJumpToDate) {
-          this.onJumpToDate(targetTs);
-        } else {
-          void this.controller.jumpTo(targetTs);
-        }
-      }
+    safeSetAttr(this.jumpBtn, 'role', 'button');
+    safeSetAttr(this.jumpBtn, 'aria-haspopup', 'true');
+    safeSetAttr(this.jumpBtn, 'aria-expanded', 'false');
+    this.jumpBtn.innerHTML = `${getIcon('jump')} <span class="replay-btn-text">Jump</span>`;
+    this.jumpBtn.title = 'Jump to Date or Bar (J)';
+    this.jumpBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleJumpPopup();
     });
 
     this.counterEl = document.createElement('span');
@@ -219,35 +288,41 @@ export class ReplayBar {
     this.statusBadge.className = 'replay-badge badge-paused';
     this.statusBadge.textContent = 'IDLE';
 
-    rightGroup.append(
-      speedWrap,
-      modeWrap,
+    centerGroup.append(
       this.jumpInput,
       this.jumpBtn,
       this.counterEl,
       this.statusBadge,
     );
 
-    this.container.append(leftGroup, rightGroup);
+    const rightGroup = document.createElement('div');
+    rightGroup.className = 'replay-group right-group engine-group';
+
+    rightGroup.append(
+      speedWrap,
+      modeWrap,
+    );
+
+    this.container.append(leftGroup, centerGroup, rightGroup);
   }
 
   update(state: ReplayState): void {
     if (state.status !== this.lastStatus) {
       this.lastStatus = state.status;
       if (state.status === 'PLAYING') {
-        this.playBtn.innerHTML = `${getIcon('pause')} <span>Pause</span>`;
+        this.playBtn.innerHTML = getIcon('pause');
         this.playBtn.classList.add('playing');
         this.playBtn.title = 'Pause (Space)';
         this.statusBadge.className = 'replay-badge badge-playing';
         this.statusBadge.textContent = 'PLAYING';
       } else if (state.status === 'FINISHED') {
-        this.playBtn.innerHTML = `${getIcon('play')} <span>Replay</span>`;
+        this.playBtn.innerHTML = getIcon('play');
         this.playBtn.classList.remove('playing');
         this.playBtn.title = 'Replay from start (Space)';
         this.statusBadge.className = 'replay-badge badge-finished';
         this.statusBadge.textContent = 'FINISHED';
       } else {
-        this.playBtn.innerHTML = `${getIcon('play')} <span>Play</span>`;
+        this.playBtn.innerHTML = getIcon('play');
         this.playBtn.classList.remove('playing');
         this.playBtn.title = 'Play (Space)';
         this.statusBadge.className = 'replay-badge badge-paused';
@@ -256,6 +331,7 @@ export class ReplayBar {
     }
 
     if (state.current_timestamp && state.current_timestamp > 0) {
+      this.currentTimestamp = state.current_timestamp;
       const dt = new Date(state.current_timestamp * 1000);
       const isoStr = dt.toISOString().slice(0, 16);
       if (document.activeElement !== this.jumpInput && this.jumpInput.value !== isoStr) {
@@ -263,9 +339,12 @@ export class ReplayBar {
       }
     }
 
-    const counterText = `Bar ${state.current_index + 1} / ${state.total_candles} (${state.symbol} · ${state.timeframe})`;
+    const currentBar = (state.current_index ?? -1) >= 0 ? state.current_index + 1 : 0;
+    const totalBars = state.total_candles ?? 0;
+    const counterText = `${currentBar.toLocaleString()} / ${totalBars.toLocaleString()} bars`;
     if (counterText !== this.lastCounterText) {
       this.counterEl.textContent = counterText;
+      this.counterEl.title = `Replay Progress: ${currentBar.toLocaleString()} of ${totalBars.toLocaleString()} candles (${state.symbol || ''} · ${state.timeframe || ''})`;
       this.lastCounterText = counterText;
     }
 
@@ -362,52 +441,22 @@ export class ReplayBar {
 
     this.positionSpeedPopup();
 
-    this.boundOnOutsideClick = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (target && !popup.contains(target) && !this.speedWrap.contains(target)) {
-        this.closeSpeedPopup();
-      }
-    };
-    this.boundOnKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeSpeedPopup();
-        this.speedWrap.focus();
-      }
-    };
-    this.boundOnWindowResize = () => {
-      if (this.speedPopupEl) {
-        this.positionSpeedPopup();
-      }
-    };
-
-    document.addEventListener('click', this.boundOnOutsideClick);
-    document.addEventListener('keydown', this.boundOnKeyDown);
-    window.addEventListener('resize', this.boundOnWindowResize);
+    this.speedPopoverBinding = attachPopoverDismissal({
+      popupEl: popup,
+      anchorEl: this.speedWrap,
+      onDismiss: () => this.closeSpeedPopup(),
+      onReposition: () => this.positionSpeedPopup(),
+      restoreFocus: true,
+    });
   }
 
   private positionSpeedPopup(): void {
     if (!this.speedPopupEl) return;
-    const rect = this.speedWrap.getBoundingClientRect();
-    const popupWidth = this.speedPopupEl.offsetWidth || 180;
-    const padding = 8;
-
-    // Anchor popup directly above the speed wrap button
-    const bottom = window.innerHeight - rect.top + 6;
-    let left = rect.left + rect.width / 2 - popupWidth / 2;
-
-    // Boundary clamping
-    if (left < padding) {
-      left = padding;
-    } else if (left + popupWidth > window.innerWidth - padding) {
-      left = Math.max(padding, window.innerWidth - padding - popupWidth);
-    }
-
-    this.speedPopupEl.style.position = 'fixed';
-    this.speedPopupEl.style.bottom = `${bottom}px`;
-    this.speedPopupEl.style.left = `${left}px`;
-    this.speedPopupEl.style.zIndex = '1000';
+    positionPopoverAbove(this.speedWrap, this.speedPopupEl, {
+      viewportPadding: 8,
+      offsetY: 6,
+      fallbackWidth: 180,
+    });
   }
 
   public closeSpeedPopup(): void {
@@ -417,17 +466,9 @@ export class ReplayBar {
     this.speedWrap.classList.remove('open');
     safeSetAttr(this.speedWrap, 'aria-expanded', 'false');
 
-    if (this.boundOnOutsideClick) {
-      document.removeEventListener('click', this.boundOnOutsideClick);
-      this.boundOnOutsideClick = null;
-    }
-    if (this.boundOnKeyDown) {
-      document.removeEventListener('keydown', this.boundOnKeyDown);
-      this.boundOnKeyDown = null;
-    }
-    if (this.boundOnWindowResize) {
-      window.removeEventListener('resize', this.boundOnWindowResize);
-      this.boundOnWindowResize = null;
+    if (this.speedPopoverBinding) {
+      this.speedPopoverBinding.destroy();
+      this.speedPopoverBinding = null;
     }
   }
 
@@ -456,8 +497,380 @@ export class ReplayBar {
     return this.speedPopupEl !== null;
   }
 
+  public toggleJumpPopup(): void {
+    if (this.jumpPopupEl) {
+      this.closeJumpPopup();
+    } else {
+      this.openJumpPopup();
+    }
+  }
+
+  public isJumpPopupOpen(): boolean {
+    return this.jumpPopupEl !== null;
+  }
+
+  public openJumpPopup(): void {
+    if (this.jumpPopupEl) return;
+    this.closeSpeedPopup();
+
+    const popup = document.createElement('div');
+    popup.className = 'tv-jump-popup';
+    safeSetAttr(popup, 'role', 'dialog');
+    safeSetAttr(popup, 'aria-label', 'Jump Replay to Date');
+
+    // 1. Header
+    const header = document.createElement('div');
+    header.className = 'tv-jump-header';
+    header.innerHTML = `
+      <div class="tv-jump-title">
+        <span class="tv-jump-title-icon">${getIcon('jump')}</span>
+        <span>Jump to Date & Time</span>
+      </div>
+    `;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tv-jump-close-btn';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close (Esc)';
+    closeBtn.innerHTML = getIcon('close');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeJumpPopup();
+    });
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    // 2. Presets Section
+    const presetsSection = document.createElement('div');
+    presetsSection.className = 'tv-jump-presets-section';
+    const presetsLabel = document.createElement('div');
+    presetsLabel.className = 'tv-jump-section-label';
+    presetsLabel.textContent = 'Quick Presets';
+    presetsSection.appendChild(presetsLabel);
+
+    const presetsList = document.createElement('div');
+    presetsList.className = 'tv-jump-presets-list';
+
+    const presets: Array<{ label: string; deltaSeconds?: number; isStart?: boolean }> = [
+      { label: '-1 Day', deltaSeconds: -86400 },
+      { label: '-1 Week', deltaSeconds: -7 * 86400 },
+      { label: '-1 Month', deltaSeconds: -30 * 86400 },
+      { label: 'Session Start', isStart: true },
+    ];
+
+    for (const p of presets) {
+      const btn = document.createElement('button');
+      btn.className = 'tv-jump-preset-btn';
+      btn.type = 'button';
+      btn.textContent = p.label;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (p.isStart) {
+          void this.controller.reset();
+          this.closeJumpPopup();
+          return;
+        }
+        const base = this.currentTimestamp || Math.floor(Date.now() / 1000);
+        const targetTs = Math.max(0, base + (p.deltaSeconds ?? 0));
+        this.executeJump(targetTs);
+      });
+      presetsList.appendChild(btn);
+    }
+    presetsSection.appendChild(presetsList);
+    popup.appendChild(presetsSection);
+
+    // 3. Date & Time Input Section
+    const inputSection = document.createElement('div');
+    inputSection.className = 'tv-jump-input-section';
+
+    const inputLabel = document.createElement('div');
+    inputLabel.className = 'tv-jump-section-label';
+    inputLabel.textContent = 'Target Date & Time';
+    inputSection.appendChild(inputLabel);
+
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'tv-jump-input-wrap';
+
+    this.jumpInput.className = 'tv-jump-popup-input replay-jump-input';
+    if (this.jumpInput.style) {
+      this.jumpInput.style.display = 'block';
+    }
+    if (this.currentTimestamp > 0 && !this.jumpInput.value) {
+      this.jumpInput.value = this.formatDatetimeValue(this.currentTimestamp);
+    }
+
+    this.jumpInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.handleJumpSubmit();
+      }
+    });
+
+    inputWrap.appendChild(this.jumpInput);
+    inputSection.appendChild(inputWrap);
+    popup.appendChild(inputSection);
+
+    // 4. Action Buttons Footer
+    const footer = document.createElement('div');
+    footer.className = 'tv-jump-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'tv-jump-cancel-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeJumpPopup();
+    });
+
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'tv-jump-submit-btn';
+    submitBtn.innerHTML = `${getIcon('jump')} <span>Jump</span>`;
+    submitBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.handleJumpSubmit();
+    });
+
+    footer.append(cancelBtn, submitBtn);
+    popup.appendChild(footer);
+
+    document.body.appendChild(popup);
+    this.jumpPopupEl = popup;
+    this.jumpBtn.classList.add('open');
+    safeSetAttr(this.jumpBtn, 'aria-expanded', 'true');
+
+    this.positionJumpPopup();
+
+    this.jumpPopoverBinding = attachPopoverDismissal({
+      popupEl: popup,
+      anchorEl: this.jumpBtn,
+      onDismiss: () => this.closeJumpPopup(),
+      onReposition: () => this.positionJumpPopup(),
+      restoreFocus: true,
+    });
+  }
+
+  private positionJumpPopup(): void {
+    if (!this.jumpPopupEl) return;
+    positionPopoverAbove(this.jumpBtn, this.jumpPopupEl, {
+      viewportPadding: 10,
+      offsetY: 6,
+      fallbackWidth: 270,
+    });
+  }
+
+  public closeJumpPopup(): void {
+    if (!this.jumpPopupEl) return;
+    if (this.jumpInput && this.jumpInput.parentElement) {
+      this.jumpInput.parentElement.removeChild(this.jumpInput);
+      if (this.jumpInput.style) {
+        this.jumpInput.style.display = 'none';
+      }
+      this.container.appendChild(this.jumpInput);
+    }
+    this.jumpPopupEl.remove();
+    this.jumpPopupEl = null;
+    this.jumpBtn.classList.remove('open');
+    safeSetAttr(this.jumpBtn, 'aria-expanded', 'false');
+
+    if (this.jumpPopoverBinding) {
+      this.jumpPopoverBinding.destroy();
+      this.jumpPopoverBinding = null;
+    }
+  }
+
+  private handleJumpSubmit(): void {
+    if (!this.jumpInput || !this.jumpInput.value) return;
+    const targetTs = Math.floor(new Date(this.jumpInput.value).getTime() / 1000);
+    if (!isNaN(targetTs) && targetTs > 0) {
+      this.executeJump(targetTs);
+    }
+  }
+
+  public executeJump(targetTs: number): void {
+    if (isNaN(targetTs) || targetTs <= 0) return;
+    this.closeJumpPopup();
+    if (this.onJumpToDate) {
+      this.onJumpToDate(targetTs);
+    } else {
+      void this.controller.jumpTo(targetTs);
+    }
+  }
+
+  private formatDatetimeValue(tsSeconds: number): string {
+    const dt = new Date(tsSeconds * 1000);
+    return dt.toISOString().slice(0, 16);
+  }
+
+  public toggleFormationPopup(): void {
+    if (this.formationPopupEl) {
+      this.closeFormationPopup();
+    } else {
+      this.openFormationPopup();
+    }
+  }
+
+  public isFormationPopupOpen(): boolean {
+    return this.formationPopupEl !== null;
+  }
+
+  public openFormationPopup(): void {
+    if (this.formationPopupEl) return;
+    this.closeSpeedPopup();
+    this.closeJumpPopup();
+
+    const popup = document.createElement('div');
+    popup.className = 'tv-formation-popup';
+    safeSetAttr(popup, 'role', 'dialog');
+    safeSetAttr(popup, 'aria-label', 'Candle Formation Simulation Mode');
+
+    // 1. Header
+    const header = document.createElement('div');
+    header.className = 'tv-formation-header';
+    header.innerHTML = `
+      <div class="tv-formation-title">
+        <span class="tv-formation-title-icon">${getIcon('activity')}</span>
+        <span>Formation Simulation</span>
+      </div>
+    `;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tv-formation-close-btn';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close (Esc)';
+    closeBtn.innerHTML = getIcon('close');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeFormationPopup();
+    });
+    header.appendChild(closeBtn);
+    popup.appendChild(header);
+
+    // 2. Mode options list
+    const list = document.createElement('div');
+    list.className = 'tv-formation-list';
+
+    const currentMode = this.controller.formationMode;
+    const info = this.controller.getFormationStatus();
+
+    const items: Array<{
+      mode: FormationMode;
+      name: string;
+      desc: string;
+      diagText: string;
+      diagClass: string;
+    }> = [
+      {
+        mode: 'ltf',
+        name: 'Real LTF (Multi-Timeframe)',
+        desc: 'Replays authentic historical lower-timeframe candles (e.g. 1m bars inside 1H candle).',
+        diagText: info.isFallback
+          ? `Fallback: ${info.reason || 'No LTF data downloaded'}`
+          : info.ltfBarsCount > 1
+          ? `Active: ${info.ltfBarsCount} historical ${info.ltfTimeframe || 'LTF'} bars`
+          : info.ltfTimeframe
+          ? `Ready: ${info.ltfTimeframe} data loaded`
+          : 'Ready: Base timeframe',
+        diagClass: info.isFallback ? 'diag-fallback' : 'diag-active',
+      },
+      {
+        mode: 'orderflow',
+        name: 'Order Flow (Tape Simulation)',
+        desc: '4-phase institutional tape algorithm with dynamic Brownian micro-tick volume velocity.',
+        diagText: 'Intra-bar Micro-tick Tape Engine',
+        diagClass: 'diag-active',
+      },
+      {
+        mode: 'instant',
+        name: 'Instant (Maximum Speed)',
+        desc: 'Bypasses intra-bar sub-ticks for instant candle completion and rapid strategy scanning.',
+        diagText: 'Intra-bar Simulation Bypassed',
+        diagClass: 'diag-neutral',
+      },
+    ];
+
+    for (const it of items) {
+      const isActive = it.mode === currentMode;
+      const itemEl = document.createElement('div');
+      itemEl.className = `tv-formation-item ${isActive ? 'active' : ''}`;
+      safeSetAttr(itemEl, 'role', 'button');
+      safeSetAttr(itemEl, 'data-mode', it.mode);
+
+      itemEl.innerHTML = `
+        <div class="tv-formation-item-top">
+          <div class="tv-formation-radio">
+            <div class="tv-formation-radio-inner"></div>
+          </div>
+          <span class="tv-formation-name">${it.name}</span>
+        </div>
+        <div class="tv-formation-desc">${it.desc}</div>
+        <div class="tv-formation-diag ${it.diagClass}">${it.diagText}</div>
+      `;
+
+      itemEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.selectFormationMode(it.mode);
+      });
+
+      list.appendChild(itemEl);
+    }
+
+    popup.appendChild(list);
+
+    document.body.appendChild(popup);
+    this.formationPopupEl = popup;
+    this.modeWrap.classList.add('open');
+    safeSetAttr(this.modeWrap, 'aria-expanded', 'true');
+
+    this.positionFormationPopup();
+
+    this.formationPopoverBinding = attachPopoverDismissal({
+      popupEl: popup,
+      anchorEl: this.modeWrap,
+      onDismiss: () => this.closeFormationPopup(),
+      onReposition: () => this.positionFormationPopup(),
+      restoreFocus: true,
+    });
+  }
+
+  private positionFormationPopup(): void {
+    if (!this.formationPopupEl) return;
+    positionPopoverAbove(this.modeWrap, this.formationPopupEl, {
+      viewportPadding: 10,
+      offsetY: 6,
+      fallbackWidth: 320,
+    });
+  }
+
+  public closeFormationPopup(): void {
+    if (!this.formationPopupEl) return;
+    this.formationPopupEl.remove();
+    this.formationPopupEl = null;
+    this.modeWrap.classList.remove('open');
+    safeSetAttr(this.modeWrap, 'aria-expanded', 'false');
+
+    if (this.formationPopoverBinding) {
+      this.formationPopoverBinding.destroy();
+      this.formationPopoverBinding = null;
+    }
+  }
+
+  public selectFormationMode(mode: FormationMode): void {
+    this.controller.setFormationMode(mode);
+    if (this.modeSelect) {
+      this.modeSelect.value = mode;
+    }
+    this.updateFormationBadge();
+    this.closeFormationPopup();
+  }
+
   public destroy(): void {
     this.closeSpeedPopup();
+    this.closeJumpPopup();
+    this.closeFormationPopup();
+    if (this.boundGlobalKey && typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('keydown', this.boundGlobalKey);
+      this.boundGlobalKey = null;
+    }
   }
 
   private updateFormationBadge(): void {
@@ -490,6 +903,26 @@ export class ReplayBar {
       this.modeBadge.className = 'replay-mode-status-badge badge-instant';
       this.modeBadge.textContent = 'Instant';
       this.modeBadge.title = 'Instant Mode: Intra-bar simulation bypassed for maximum throughput.';
+    }
+
+    // Synchronize compact trigger pill elements
+    if (this.modeDot && this.modeLabel) {
+      if (info.mode === 'ltf') {
+        this.modeDot.className = info.isFallback
+          ? 'replay-mode-dot ltf-fallback'
+          : 'replay-mode-dot ltf-active';
+        this.modeLabel.textContent = 'Real LTF';
+      } else if (info.mode === 'orderflow') {
+        this.modeDot.className = 'replay-mode-dot orderflow';
+        this.modeLabel.textContent = 'Tape Sim';
+      } else {
+        this.modeDot.className = 'replay-mode-dot instant';
+        this.modeLabel.textContent = 'Instant';
+      }
+    }
+
+    if (this.modeWrap && this.modeBadge) {
+      this.modeWrap.title = this.modeBadge.title;
     }
   }
 }
