@@ -73,6 +73,7 @@ class OrderEngine:
         initial_balance: float = 10000.0,
         user_id: str | None = None,
         is_demo: bool = False,
+        clear_journal: bool = False,
     ) -> AccountSummary:
         with self._lock:
             self.account = AccountSummary(balance=initial_balance, equity=initial_balance, free_margin=initial_balance)
@@ -83,14 +84,16 @@ class OrderEngine:
             elif user_id is not None:
                 self.orders = {k: v for k, v in self.orders.items() if v.user_id != user_id}
                 self.positions = {k: v for k, v in self.positions.items() if v.user_id != user_id}
-                self.journal.clear(user_id=user_id)
+                if clear_journal:
+                    self.journal.clear(user_id=user_id)
             else:
                 self.orders.clear()
                 self.positions.clear()
                 self._demo_trades.clear()
                 self._latest_prices.clear()
                 self._current_replay_timestamp = 0.0
-                self.journal.clear()
+                if clear_journal:
+                    self.journal.clear()
             res = self.account
 
         if self.emit:

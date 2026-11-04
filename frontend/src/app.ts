@@ -22,6 +22,10 @@ import { TradingDrawer } from './ui/trading-drawer';
 import { Watchlist } from './ui/watchlist';
 import { SlTpConfirmDialog, type SlTpModificationRequest } from './ui/sl-tp-confirm-dialog';
 import { PartialCloseDialog, type PartialCloseRequest } from './ui/partial-close-dialog';
+import { AuthStateManager } from './auth/auth-state';
+import { PaperTradingModeDialog } from './ui/paper-trading-mode-dialog';
+import { AuthModal } from './ui/auth-modal';
+import { UserNavWidget } from './ui/user-nav-widget';
 import type { PositionDefinition } from './trading/trading-types';
 
 interface RequestResponse {
@@ -70,6 +74,10 @@ export class App {
   private drawingListDialog: DrawingListDialog | null = null;
   private drawingToolbar: DrawingToolbar | null = null;
   private readonly sessionMgr: SessionManager;
+  private readonly authState: AuthStateManager;
+  private modeDialog: PaperTradingModeDialog | null = null;
+  private authModal: AuthModal | null = null;
+  private userNavWidget: UserNavWidget | null = null;
   private sessionDialog: SessionDialog | null = null;
   private logViewerDialog: LogViewerDialog | null = null;
   private quickTrade: QuickTradeOverlay | null = null;
@@ -82,6 +90,7 @@ export class App {
 
   constructor(private bridge: PythonBridge | null) {
     this.sessionMgr = new SessionManager(bridge);
+    this.authState = new AuthStateManager(bridge);
     this.chart = new ChartManager(
       requireElement('#chart-container'),
       (drawing) => void this.saveDrawing(drawing),
@@ -231,6 +240,24 @@ export class App {
       (session) => void this.applySession(session),
     );
 
+    // Auth & Paper Trading Mode Gateways
+    this.modeDialog = new PaperTradingModeDialog(document.body);
+    this.authModal = new AuthModal(document.body, this.authState, this.bridge);
+
+    const headerRight = document.querySelector<HTMLElement>('.header-right');
+    if (headerRight) {
+      this.userNavWidget = new UserNavWidget(
+        headerRight,
+        this.authState,
+        this.authModal,
+        this.bridge,
+        (msg) => this.showToast(msg),
+      );
+    }
+
+    // Restore any stored auth session or demo state
+    void this.authState.restoreSession();
+
     // Log viewer dialog
     this.logViewerDialog = new LogViewerDialog(document.body, this.bridge);
 
@@ -240,6 +267,9 @@ export class App {
       chartContainer,
       this.bridge,
       (order) => this.handleOrderPlacement(order),
+      this.authState,
+      this.modeDialog,
+      this.authModal,
     );
 
     // Right Side Collapsible Trade Panel
@@ -259,6 +289,9 @@ export class App {
         }
         this.handlePanelTransition();
       },
+      this.authState,
+      this.modeDialog,
+      this.authModal,
     );
 
     const drawerContainer = document.getElementById('trading-drawer-container');
@@ -276,6 +309,8 @@ export class App {
         (pos) => this.handleOpenModifySlTpModal(pos),
         (pos, price) => this.handleOpenPartialCloseModal(pos, price),
         () => this.handlePanelTransition(),
+        this.authState,
+        this.authModal,
       );
       this.tradingDrawer.start();
     }
@@ -459,7 +494,8 @@ export class App {
   private handleOrderPlacement(order: any): void {
     const sideText = order.side === 'BUY' ? 'BUY' : 'SELL';
     const lotText = order.quantity ? `${Number(order.quantity).toFixed(2)} Lots` : '';
-    this.showToast(`⚡ Order Executed: ${sideText} ${lotText} (${order.order_type || 'MARKET'})`);
+    const prefix = order.is_demo ? '🧪 Demo Order Executed (Unsaved)' : '⚡ Order Executed';
+    this.showToast(`${prefix}: ${sideText} ${lotText} (${order.order_type || 'MARKET'})`);
     if (!this.bridge) {
       this.handleBrowserOrder(order);
     } else {
@@ -904,6 +940,22 @@ export class App {
     if (!this.activeSymbol || !this.bridge) return;
     await this.replayController.createRandomReplay(this.activeSymbol, this.activeTimeframe);
     await this.indicatorManager.recalculateAll();
+  }
+
+  getUserNavWidget(): UserNavWidget | null {
+    return this.userNavWidget;
+  }
+
+  getAuthState(): AuthStateManager {
+    return this.authState;
+  }
+
+  getAuthModal(): AuthModal | null {
+    return this.authModal;
+  }
+
+  getModeDialog(): PaperTradingModeDialog | null {
+    return this.modeDialog;
   }
 
   private wireKeyboardShortcuts(): void {

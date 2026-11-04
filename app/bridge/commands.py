@@ -885,6 +885,47 @@ class BridgeCommandHandler(QObject):
 
         return self._envelope(action)
 
+    @Slot(str, result=str)
+    def authResetAccount(self, payload_json: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "auth_service"):
+                raise RuntimeError("auth service unavailable")
+            data = json.loads(payload_json) if payload_json.startswith("{") else {}
+            token = data.get("token", "")
+            user = self._services.auth_service.authenticate_token(token)
+            if user is None:
+                raise ValueError("Unauthorized or session expired")
+            init_bal = data.get("initial_balance")
+            target_bal = float(init_bal) if init_bal is not None else None
+            new_bal = self._services.auth_service.reset_account(user.id, target_bal)
+            if hasattr(self._services, "order_engine"):
+                self._services.order_engine.reset_account(new_bal, user_id=user.id, is_demo=False)
+            return {"balance": new_bal}
+
+        return self._envelope(action)
+
+    @Slot(result=str)
+    def authGetOrCreateLocalUser(self) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "user_repo") or not hasattr(self._services, "session_repo"):
+                raise RuntimeError("auth services unavailable")
+            local_user = self._services.user_repo.get_by_username("local_trader")
+            if local_user is None:
+                from app.auth.crypto import hash_password
+                p_hash, salt = hash_password("local_offline_secret")
+                local_user = self._services.user_repo.create_user(
+                    username="local_trader",
+                    email="local@desktop.internal",
+                    password_hash=p_hash,
+                    salt=salt,
+                    initial_balance=10000.0,
+                    user_id="usr_local_default",
+                )
+            session = self._services.session_repo.create_session(local_user.id, duration_seconds=86400 * 365)
+            return {"user": local_user.to_dict(), "token": session.token}
+
+        return self._envelope(action)
+
     # -- events (Python -> TypeScript) ------------------------------
 
     def emit(self, event: str, payload: dict[str, Any] | None = None) -> None:
