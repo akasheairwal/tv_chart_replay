@@ -1,8 +1,8 @@
 /**
  * Paper Trading Mode Selection Dialog.
  * Displays a choice when an unauthenticated guest attempts to place an order:
- * 1. Track & Save Trade History (Free Account - Permanent SQLite Storage)
- * 2. Instant Demo Preview (No Sign-Up - Ephemeral In-Memory Storage)
+ * 1. Track & Save Trade History (Free Account - Permanent Storage)
+ * 2. Instant Demo Preview (No Sign-Up - Temporary Session)
  */
 
 import { getIcon } from './icons';
@@ -83,7 +83,7 @@ export class PaperTradingModeDialog {
             <ul class="mode-features-list">
               <li>
                 <span class="check-icon">${getIcon('check')}</span>
-                <span>Permanent SQLite journal storage</span>
+                <span>Permanent trade journal & history</span>
               </li>
               <li>
                 <span class="check-icon">${getIcon('check')}</span>
@@ -115,7 +115,7 @@ export class PaperTradingModeDialog {
               ${getIcon('lightning')}
             </div>
             <h3 class="mode-card-title">Instant Demo Preview</h3>
-            <p class="mode-card-desc">Execute paper orders immediately with zero sign-up. In-memory demo simulation for quick testing.</p>
+            <p class="mode-card-desc">Try out paper trading right away with no sign-up required. Practice trades in a temporary session.</p>
             
             <ul class="mode-features-list">
               <li>
@@ -128,11 +128,11 @@ export class PaperTradingModeDialog {
               </li>
               <li>
                 <span class="check-icon check-muted">${getIcon('shield')}</span>
-                <span class="feature-muted"><strong>Zero DB writes</strong> — history not saved</span>
+                <span class="feature-muted"><strong>Temporary session</strong> — history is not saved</span>
               </li>
               <li>
                 <span class="check-icon check-muted">${getIcon('history')}</span>
-                <span class="feature-muted">Trades erase when tab / session resets</span>
+                <span class="feature-muted">Trades clear when you close or reload</span>
               </li>
             </ul>
 

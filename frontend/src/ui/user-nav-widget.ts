@@ -72,7 +72,7 @@ export class UserNavWidget {
     const wrap = document.createElement('div');
     wrap.className = 'user-nav-demo-wrap';
     wrap.innerHTML = `
-      <div class="user-nav-demo-badge" title="Temporary Demo Session: Trades are simulated in memory with zero database writes">
+      <div class="user-nav-demo-badge" title="Demo Session: Trades are temporary and will not be saved to your trade history">
         <span class="demo-pulse-dot"></span>
         <span class="demo-badge-text">Demo Mode</span>
       </div>
@@ -272,7 +272,7 @@ export class UserNavWidget {
             <span class="auth-icon-badge">${getIcon('history')}</span>
             <div>
               <h2 class="modal-title">${this.escapeHtml(user.username)}'s Performance</h2>
-              <p class="modal-subtitle">Aggregated metrics from your permanent SQLite trade journal</p>
+              <p class="modal-subtitle">Aggregated metrics from your saved trade journal</p>
             </div>
           </div>
           <button type="button" class="modal-close-btn" id="stats-close-btn">${getIcon('close')}</button>

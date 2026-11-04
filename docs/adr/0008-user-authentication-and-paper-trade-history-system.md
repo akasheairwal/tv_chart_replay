@@ -102,7 +102,7 @@ We select **Alternative A**.
                +-----------------------------+   +-----------------------------+
                | Authenticated User Session  |   |  Volatile Paper Trading     |
                |  - User ID Token Attached   |   |  - Banner: "Demo (Unsaved)" |
-               |  - DB Persisted Trades      |   |  - Zero DB Writes           |
+               |  - Saved Trade History      |   |  - Unsaved Demo Trades      |
                |  - Multi-Device Sync        |   |  - Resets on Reload/Session |
                +-----------------------------+   +-----------------------------+
 ```

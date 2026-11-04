@@ -26,7 +26,7 @@ This specification details the architecture, UX flows, database schema, and API 
 | :--- | :--- |
 | **Default Appearance** | Must look and behave exactly as it does now upon initial visit. No splash screens, no forced login popups, no blocking gates. |
 | **Order Interception** | Triggered only when an unauthenticated guest attempts to execute a trade (via Quick Trade bar, Order Panel, or Hotkey). |
-| **Instant Demo Mode** | Allows immediate execution of paper orders. Calculations (PnL, margin, SL/TP triggers) run entirely in-memory. Zero rows written to SQLite. |
+| **Instant Demo Mode** | Allows immediate execution of paper orders. Calculations (PnL, margin, SL/TP triggers) run entirely in-memory. Calculations run in memory during preview without saving trade history. |
 | **Persistent User Mode** | Authenticated users have all closed trades, open positions, and account balances saved to the SQLite database tied to their unique `user_id`. |
 | **Dual Transport Support** | Seamless compatibility with both the cloud web backend (FastAPI HTTP + WebSocket) and the native desktop shell (PySide6 `QWebChannel`). |
 | **Zero Bloat Security** | Native Python cryptographic hashing (`hashlib.pbkdf2_hmac` with SHA256) and cryptographically secure tokens (`secrets.token_urlsafe`), requiring no paid third-party auth services or external servers. |
@@ -279,7 +279,7 @@ To strictly honor the guarantee that **no demo trades are saved in the database*
                       |                                 |
                       | 1. Execute order                | 1. Execute order
                       | 2. Emit WebSocket tick fills    | 2. Emit WebSocket tick fills
-                      | 3. Commit to SQLite Journal     | 3. Buffer in volatile RAM
+                      | 3. Save to Permanent Journal    | 3. Buffer in temporary session
                       v                                 v
           +-----------------------+     +-------------------------------+
           | SQLite `trade_journal`|     | Discard on close/reload       |
@@ -289,7 +289,7 @@ To strictly honor the guarantee that **no demo trades are saved in the database*
 
 1. **`OrderEngine` (Persistent):**
    - Receives authenticated `user_id`.
-   - On position close, executes `self.journal.record_trade(...)`, inserting the record into the SQLite database.
+   - On position close, executes `self.journal.record_trade(...)`, saving the record into the permanent trade journal.
    - Updates `users.balance` in the database.
 
 2. **`DemoOrderEngine` (Ephemeral):**
@@ -380,7 +380,7 @@ To strictly honor the guarantee that **no demo trades are saved in the database*
 
 #### `GET /api/trading/journal`
 **Query Parameters:** `?limit=100&is_demo=false`
-- If authenticated: Returns user's persistent trade history from SQLite.
+- If authenticated: Returns user's saved trade history.
 - If demo: Returns ephemeral session trade records from memory.
 
 #### `POST /api/trading/reset-account`
@@ -487,7 +487,7 @@ export class AuthStateManager {
 | **Phase 2** | **Backend Services & API Server** | Implement `AuthService` in `app/auth/`. Add FastAPI auth routes (`/api/auth/*`) in `app/api/server.py`. Update `order_engine.py` to support `persist=False` ephemeral execution. |
 | **Phase 3** | **Desktop Bridge Adapter** | Mirror auth commands in `app/bridge/commands.py` (`authRegister`, `authLogin`, `authGetMe`) for PySide6 desktop target. |
 | **Phase 4** | **Frontend Auth & Mode Gateways** | Build `AuthModal`, `PaperTradingModeDialog`, and `UserNavWidget` in `frontend/src/ui/`. Wire into `order-panel.ts` and `quick-trade-overlay.ts` to intercept unauthenticated orders. |
-| **Phase 5** | **Testing & Verification** | Add end-to-end tests: default guest view verification, demo mode zero-write verification, user login and persistent journal verification, and session restore tests. |
+| **Phase 5** | **Testing & Verification** | Add end-to-end tests: default guest view verification, demo mode unsaved history verification, user login and persistent journal verification, and session restore tests. |
 
 ---
 
@@ -495,6 +495,6 @@ export class AuthStateManager {
 
 This architecture delivers the exact requirements requested:
 - The terminal **looks and functions completely normal by default** without imposing any registration barriers on visitors.
-- When placing orders, users are given a crystal clear choice: **store history** (requiring account) or **instant demo preview** (no history saved, zero database footprint).
+- When placing orders, users are given a crystal clear choice: **store history** (requiring account) or **instant demo preview** (practice session, trade history not saved).
 - Fully compatible with the dual-transport vision of native desktop speed and zero-cost cloud hosting.
 

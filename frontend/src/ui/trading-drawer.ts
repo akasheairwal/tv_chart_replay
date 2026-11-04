@@ -356,7 +356,7 @@ export class TradingDrawer {
           <div class="demo-journal-warning-banner">
             <div class="warning-banner-text">
               ${getIcon('flask')}
-              <span><strong>Temporary Demo Session:</strong> These trades are held in memory and will NOT be saved to SQLite.</span>
+              <span><strong>Demo Session:</strong> Trades placed in demo mode are temporary and will not be saved to your trade history.</span>
             </div>
             <button type="button" class="banner-action-btn" id="save-demo-trades-btn">Save My Trades · Sign In</button>
           </div>
