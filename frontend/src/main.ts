@@ -5,7 +5,14 @@ import { PythonBridge } from './bridge/python-bridge';
 function setStatus(elementId: string, text: string, state?: 'ok' | 'err'): void {
   const el = document.getElementById(elementId);
   if (!el) return;
-  el.textContent = text;
+  const label = el.querySelector('.status-label');
+  if (label) {
+    label.textContent = text;
+  } else if (elementId === 'bridge-status') {
+    el.innerHTML = `<span class="status-dot"></span><span class="status-label">${text}</span>`;
+  } else {
+    el.textContent = text;
+  }
   el.classList.remove('ok', 'err');
   if (state) el.classList.add(state);
 }
@@ -37,14 +44,14 @@ async function boot(): Promise<void> {
   const info = await bridge.info();
 
   if (info.connected) {
-    setStatus('bridge-status', `bridge v${info.version ?? '?'}`, 'ok');
+    setStatus('bridge-status', 'connected', 'ok');
     const pong = await bridge.call<string>('systemPing', 'hello from app');
     setStatus('status-bar', `bridge round-trip: ${pong}`, 'ok');
   } else if (bridge.hasBackendUrl()) {
     setStatus('bridge-status', 'waking up...', 'err');
     setStatus('status-bar', 'Cloud backend is waking up (~45s). Running in browser mode while connecting…', 'err');
   } else {
-    setStatus('bridge-status', 'browser mode', 'err');
+    setStatus('bridge-status', 'disconnected', 'err');
     setStatus('status-bar', 'Qt bridge unavailable - running outside the desktop shell', 'err');
   }
 

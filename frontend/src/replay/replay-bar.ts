@@ -2,7 +2,20 @@ import type { ReplayController, ReplayState } from './replay-controller';
 import type { FormationMode } from './sub-tick-generator';
 import { getIcon } from '../ui/icons';
 
-export const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100];
+export const REPLAY_SPEEDS = [0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 25, 50, 100];
+
+function safeSetAttr(el: HTMLElement | null | undefined, name: string, value: string): void {
+  if (el && typeof el.setAttribute === 'function') {
+    el.setAttribute(name, value);
+  }
+}
+
+function safeGetAttr(el: HTMLElement | null | undefined, name: string): string | null {
+  if (el && typeof el.getAttribute === 'function') {
+    return el.getAttribute(name);
+  }
+  return null;
+}
 
 export class ReplayBar {
   private playBtn!: HTMLButtonElement;
@@ -10,7 +23,15 @@ export class ReplayBar {
   private stepFwdBtn!: HTMLButtonElement;
   private resetBtn!: HTMLButtonElement;
   private randomBtn!: HTMLButtonElement;
+  private speedWrap!: HTMLElement;
+  private speedLabel!: HTMLElement;
+  private speedChevron!: HTMLElement;
   private speedSelect!: HTMLSelectElement;
+  private speedPopupEl: HTMLElement | null = null;
+  private currentSpeed = 1;
+  private boundOnOutsideClick: ((e: MouseEvent) => void) | null = null;
+  private boundOnKeyDown: ((e: KeyboardEvent) => void) | null = null;
+  private boundOnWindowResize: (() => void) | null = null;
   private modeSelect!: HTMLSelectElement;
   private modeBadge!: HTMLElement;
   private lastMode: FormationMode | null = null;
@@ -84,10 +105,32 @@ export class ReplayBar {
 
     const speedWrap = document.createElement('div');
     speedWrap.className = 'replay-speed-wrap';
-    speedWrap.innerHTML = `<span class="replay-speed-icon">${getIcon('speed')}</span>`;
+    safeSetAttr(speedWrap, 'role', 'button');
+    safeSetAttr(speedWrap, 'tabindex', '0');
+    safeSetAttr(speedWrap, 'aria-haspopup', 'true');
+    safeSetAttr(speedWrap, 'aria-expanded', 'false');
+    speedWrap.title = 'Playback Speed (Current: 1x)';
 
+    const speedIcon = document.createElement('span');
+    speedIcon.className = 'replay-speed-icon';
+    speedIcon.innerHTML = getIcon('speed');
+
+    this.speedLabel = document.createElement('span');
+    this.speedLabel.className = 'replay-speed-label';
+    this.speedLabel.textContent = `${this.currentSpeed}x`;
+
+    this.speedChevron = document.createElement('span');
+    this.speedChevron.className = 'replay-speed-chevron';
+    this.speedChevron.innerHTML = getIcon('chevron_down');
+
+    // Kept in DOM for compatibility with any tests or external readers
     this.speedSelect = document.createElement('select');
     this.speedSelect.className = 'replay-speed-select';
+    if (this.speedSelect.style) {
+      this.speedSelect.style.display = 'none';
+    }
+    safeSetAttr(this.speedSelect, 'tabindex', '-1');
+    safeSetAttr(this.speedSelect, 'aria-hidden', 'true');
     for (const spd of REPLAY_SPEEDS) {
       const opt = document.createElement('option');
       opt.value = spd.toString();
@@ -95,10 +138,26 @@ export class ReplayBar {
       if (spd === 1) opt.selected = true;
       this.speedSelect.appendChild(opt);
     }
+    this.speedSelect.value = this.currentSpeed.toString();
     this.speedSelect.addEventListener('change', () => {
-      void this.controller.setSpeed(parseFloat(this.speedSelect.value));
+      this.selectSpeed(parseFloat(this.speedSelect.value));
     });
-    speedWrap.appendChild(this.speedSelect);
+
+    speedWrap.append(speedIcon, this.speedLabel, this.speedChevron, this.speedSelect);
+    this.speedWrap = speedWrap;
+
+    this.speedWrap.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSpeedPopup();
+    });
+
+    this.speedWrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleSpeedPopup();
+      }
+    });
 
     const modeWrap = document.createElement('div');
     modeWrap.className = 'replay-mode-wrap';
@@ -211,8 +270,26 @@ export class ReplayBar {
     }
 
     if (state.speed !== this.lastSpeed) {
-      this.speedSelect.value = state.speed.toString();
       this.lastSpeed = state.speed;
+      this.currentSpeed = state.speed;
+      this.speedLabel.textContent = `${state.speed}x`;
+      this.speedWrap.title = `Playback Speed (Current: ${state.speed}x)`;
+      this.speedSelect.value = state.speed.toString();
+
+      // If popup is currently open, dynamically update checkmarks and active highlight
+      if (this.speedPopupEl) {
+        const items = this.speedPopupEl.querySelectorAll<HTMLElement>('.tv-speed-item');
+        items.forEach((item) => {
+          const spd = parseFloat(safeGetAttr(item, 'data-speed') || '0');
+          const isActive = Math.abs(spd - state.speed) < 0.001;
+          item.classList.toggle('active', isActive);
+          safeSetAttr(item, 'aria-checked', isActive ? 'true' : 'false');
+          const checkEl = item.querySelector('.tv-speed-check');
+          if (checkEl) {
+            checkEl.innerHTML = isActive ? getIcon('check') : '';
+          }
+        });
+      }
     }
 
     if (this.controller.formationMode !== this.lastMode) {
@@ -221,6 +298,166 @@ export class ReplayBar {
     }
 
     this.updateFormationBadge();
+  }
+
+  public toggleSpeedPopup(): void {
+    if (this.speedPopupEl) {
+      this.closeSpeedPopup();
+    } else {
+      this.openSpeedPopup();
+    }
+  }
+
+  public openSpeedPopup(): void {
+    if (this.speedPopupEl) return;
+
+    const popup = document.createElement('div');
+    popup.className = 'tv-speed-popup';
+    safeSetAttr(popup, 'role', 'menu');
+    safeSetAttr(popup, 'aria-label', 'Replay Speed Presets');
+
+    const header = document.createElement('div');
+    header.className = 'tv-speed-header';
+    header.innerHTML = '<span>Playback Speed</span>';
+    popup.appendChild(header);
+
+    const listWrap = document.createElement('div');
+    listWrap.className = 'tv-speed-list';
+
+    for (const spd of REPLAY_SPEEDS) {
+      const isActive = Math.abs(spd - this.currentSpeed) < 0.001;
+      const item = document.createElement('div');
+      item.className = `tv-speed-item ${isActive ? 'active' : ''}`;
+      safeSetAttr(item, 'role', 'menuitemradio');
+      safeSetAttr(item, 'aria-checked', isActive ? 'true' : 'false');
+      safeSetAttr(item, 'data-speed', spd.toString());
+
+      const checkSpan = document.createElement('span');
+      checkSpan.className = 'tv-speed-check';
+      checkSpan.innerHTML = isActive ? getIcon('check') : '';
+
+      const numSpan = document.createElement('span');
+      numSpan.className = 'tv-speed-text';
+      numSpan.textContent = `${spd}x`;
+
+      const descSpan = document.createElement('span');
+      descSpan.className = 'tv-speed-desc';
+      descSpan.textContent = this.getSpeedDescription(spd);
+
+      item.append(checkSpan, numSpan, descSpan);
+
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.selectSpeed(spd);
+      });
+
+      listWrap.appendChild(item);
+    }
+    popup.appendChild(listWrap);
+
+    document.body.appendChild(popup);
+    this.speedPopupEl = popup;
+    this.speedWrap.classList.add('open');
+    safeSetAttr(this.speedWrap, 'aria-expanded', 'true');
+
+    this.positionSpeedPopup();
+
+    this.boundOnOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && !popup.contains(target) && !this.speedWrap.contains(target)) {
+        this.closeSpeedPopup();
+      }
+    };
+    this.boundOnKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeSpeedPopup();
+        this.speedWrap.focus();
+      }
+    };
+    this.boundOnWindowResize = () => {
+      if (this.speedPopupEl) {
+        this.positionSpeedPopup();
+      }
+    };
+
+    document.addEventListener('click', this.boundOnOutsideClick);
+    document.addEventListener('keydown', this.boundOnKeyDown);
+    window.addEventListener('resize', this.boundOnWindowResize);
+  }
+
+  private positionSpeedPopup(): void {
+    if (!this.speedPopupEl) return;
+    const rect = this.speedWrap.getBoundingClientRect();
+    const popupWidth = this.speedPopupEl.offsetWidth || 180;
+    const padding = 8;
+
+    // Anchor popup directly above the speed wrap button
+    const bottom = window.innerHeight - rect.top + 6;
+    let left = rect.left + rect.width / 2 - popupWidth / 2;
+
+    // Boundary clamping
+    if (left < padding) {
+      left = padding;
+    } else if (left + popupWidth > window.innerWidth - padding) {
+      left = Math.max(padding, window.innerWidth - padding - popupWidth);
+    }
+
+    this.speedPopupEl.style.position = 'fixed';
+    this.speedPopupEl.style.bottom = `${bottom}px`;
+    this.speedPopupEl.style.left = `${left}px`;
+    this.speedPopupEl.style.zIndex = '1000';
+  }
+
+  public closeSpeedPopup(): void {
+    if (!this.speedPopupEl) return;
+    this.speedPopupEl.remove();
+    this.speedPopupEl = null;
+    this.speedWrap.classList.remove('open');
+    safeSetAttr(this.speedWrap, 'aria-expanded', 'false');
+
+    if (this.boundOnOutsideClick) {
+      document.removeEventListener('click', this.boundOnOutsideClick);
+      this.boundOnOutsideClick = null;
+    }
+    if (this.boundOnKeyDown) {
+      document.removeEventListener('keydown', this.boundOnKeyDown);
+      this.boundOnKeyDown = null;
+    }
+    if (this.boundOnWindowResize) {
+      window.removeEventListener('resize', this.boundOnWindowResize);
+      this.boundOnWindowResize = null;
+    }
+  }
+
+  public selectSpeed(speed: number): void {
+    this.currentSpeed = speed;
+    this.lastSpeed = speed;
+    this.speedLabel.textContent = `${speed}x`;
+    this.speedWrap.title = `Playback Speed (Current: ${speed}x)`;
+    this.speedSelect.value = speed.toString();
+    this.closeSpeedPopup();
+    void this.controller.setSpeed(speed);
+  }
+
+  public getSpeedDescription(spd: number): string {
+    if (spd < 1) {
+      const sec = Math.round(1 / spd);
+      return `1 bar / ${sec}s`;
+    }
+    if (spd === 1) {
+      return '1 bar / 1s';
+    }
+    return `${spd} bars / 1s`;
+  }
+
+  public isSpeedPopupOpen(): boolean {
+    return this.speedPopupEl !== null;
+  }
+
+  public destroy(): void {
+    this.closeSpeedPopup();
   }
 
   private updateFormationBadge(): void {

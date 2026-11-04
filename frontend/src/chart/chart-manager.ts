@@ -17,31 +17,27 @@ import type { SlTpModificationRequest } from '../ui/sl-tp-confirm-dialog';
 export function detectPricePrecision(samplePrice: number, symbol = ''): {
   precision: number;
   minMove: number;
-  minimumWidth: number;
 } {
   const sym = (symbol || '').toUpperCase();
   if (sym.includes('JPY')) {
-    return { precision: 3, minMove: 0.001, minimumWidth: 80 };
+    return { precision: 3, minMove: 0.001 };
   }
   if (samplePrice <= 0 || isNaN(samplePrice)) {
-    return { precision: 5, minMove: 0.00001, minimumWidth: 85 };
+    return { precision: 5, minMove: 0.00001 };
   }
   if (samplePrice < 0.001) {
-    return { precision: 7, minMove: 0.0000001, minimumWidth: 95 };
+    return { precision: 7, minMove: 0.0000001 };
   }
   if (samplePrice < 0.1) {
-    return { precision: 6, minMove: 0.000001, minimumWidth: 90 };
+    return { precision: 6, minMove: 0.000001 };
   }
   if (samplePrice < 10) {
-    return { precision: 5, minMove: 0.00001, minimumWidth: 85 };
+    return { precision: 5, minMove: 0.00001 };
   }
   if (samplePrice < 100) {
-    return { precision: 3, minMove: 0.001, minimumWidth: 80 };
+    return { precision: 3, minMove: 0.001 };
   }
-  if (samplePrice < 10000) {
-    return { precision: 2, minMove: 0.01, minimumWidth: 85 };
-  }
-  return { precision: 2, minMove: 0.01, minimumWidth: 90 };
+  return { precision: 2, minMove: 0.01 };
 }
 
 export class ChartManager {
@@ -61,6 +57,13 @@ export class ChartManager {
   private onUserPointerDown?: () => void;
   private onUserPointerUp?: () => void;
   private onUserWheel?: () => void;
+  private onDimensionsChange?: () => void;
+  private onPriceScaleWheel?: (e: WheelEvent) => void;
+  private onPriceScaleDblClick?: (e: MouseEvent) => void;
+
+  setOnDimensionsChange(cb: () => void): void {
+    this.onDimensionsChange = cb;
+  }
 
   constructor(
     private readonly container: HTMLElement,
@@ -136,6 +139,7 @@ export class ChartManager {
         axisPressedMouseMove: true,
         mouseWheel: true,
         pinch: true,
+        axisDoubleClickReset: true,
       },
       timeScale: {
         timeVisible: true,
@@ -146,7 +150,6 @@ export class ChartManager {
         borderColor: '#2a2e39',
         autoScale: true,
         visible: true,
-        minimumWidth: 85,
         borderVisible: true,
         alignLabels: true,
         scaleMargins: {
@@ -174,6 +177,8 @@ export class ChartManager {
     this.volumeSeries = this.chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       priceScaleId: '',
+      lastValueVisible: false,
+      priceLineVisible: false,
     });
 
     this.volumeSeries.priceScale().applyOptions({
@@ -213,6 +218,7 @@ export class ChartManager {
             if (this.drawingEngine) {
               this.drawingEngine.resize();
             }
+            this.onDimensionsChange?.();
           }
         });
       }
@@ -235,6 +241,50 @@ export class ChartManager {
     this.container.addEventListener('pointerdown', this.onUserPointerDown);
     window.addEventListener('pointerup', this.onUserPointerUp);
     this.container.addEventListener('wheel', this.onUserWheel, { passive: true });
+
+    // Intercept wheel events on price scale to zoom price vertically instead of zooming time scale
+    this.onPriceScaleWheel = (e: WheelEvent) => {
+      if (!this.chart || !this.candlestickSeries) return;
+      const table = typeof this.container.querySelector === 'function' ? this.container.querySelector('table') : null;
+      if (!table) return;
+      const priceScaleTd = table.querySelector('tr:first-child td:last-child') as HTMLElement | null;
+      if (!priceScaleTd) return;
+      const rect = priceScaleTd.getBoundingClientRect();
+
+      const inPriceScale = (
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom
+      );
+
+      if (inPriceScale) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.cancelCameraAnimation();
+        this.zoomPriceScale(e.deltaY, e.clientY);
+      }
+    };
+    this.container.addEventListener('wheel', this.onPriceScaleWheel, { capture: true, passive: false });
+
+    // Double-click on price scale resets auto-scaling
+    this.onPriceScaleDblClick = (e: MouseEvent) => {
+      const table = typeof this.container.querySelector === 'function' ? this.container.querySelector('table') : null;
+      if (!table) return;
+      const priceScaleTd = table.querySelector('tr:first-child td:last-child') as HTMLElement | null;
+      if (!priceScaleTd) return;
+      const rect = priceScaleTd.getBoundingClientRect();
+      if (
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom
+      ) {
+        this.setAutoScale(true);
+        this.drawingEngine?.redraw();
+      }
+    };
+    this.container.addEventListener('dblclick', this.onPriceScaleDblClick);
   }
 
   pauseResize(): void {
@@ -258,6 +308,7 @@ export class ChartManager {
       if (this.drawingEngine) {
         this.drawingEngine.resize();
       }
+      this.onDimensionsChange?.();
     }
   }
 
@@ -290,11 +341,6 @@ export class ChartManager {
         minMove: fmt.minMove,
       },
     });
-    this.chart.applyOptions({
-      rightPriceScale: {
-        minimumWidth: fmt.minimumWidth,
-      },
-    });
 
     const { candles, volumes } = parseCompactHistory(rows);
     this.candlestickSeries.setData(candles);
@@ -311,6 +357,14 @@ export class ChartManager {
       }
       this.drawingEngine.redraw();
     }
+
+    requestAnimationFrame(() => {
+      this.onDimensionsChange?.();
+      if (this.drawingEngine) {
+        this.drawingEngine.resize();
+        this.drawingEngine.redraw();
+      }
+    });
   }
 
   /**
@@ -546,6 +600,139 @@ export class ChartManager {
   }
 
   /**
+   * Restores the chart viewport to default auto-scaled and right-fitted bounds.
+   * Corresponds to TradingView "Reset chart view" (Alt + R) - ADR 0007.
+   */
+  resetChartView(): void {
+    if (!this.chart) return;
+
+    // 1. Cancel active smooth camera pan interpolations
+    this.cancelCameraAnimation();
+
+    // 2. Auto-scale primary price scale
+    try {
+      this.chart.priceScale('right').applyOptions({
+        autoScale: true,
+      });
+    } catch {
+      /* ignore */
+    }
+
+    // 3. Auto-scale any secondary indicator sub-pane price scales
+    for (const series of this.indicatorSeries.values()) {
+      try {
+        series.priceScale().applyOptions({
+          autoScale: true,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 4. Reset time scale: fit historical content and return camera to current edge
+    try {
+      this.chart.timeScale().fitContent();
+      this.chart.timeScale().resetTimeScale();
+    } catch {
+      /* ignore */
+    }
+
+    // 5. Invalidate and re-render vector drawing canvas overlay
+    if (this.drawingEngine) {
+      this.drawingEngine.redraw();
+    }
+  }
+
+  /**
+   * Toggles auto-scale on the right price scale.
+   */
+  setAutoScale(enabled: boolean): void {
+    if (!this.chart) return;
+    try {
+      this.chart.priceScale('right').applyOptions({ autoScale: enabled });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Returns whether auto-scale is currently enabled on the right price scale.
+   */
+  isAutoScale(): boolean {
+    if (!this.chart) return true;
+    try {
+      const opts = this.chart.priceScale('right').options();
+      return opts.autoScale !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Toggles invert-scale on the right price scale.
+   */
+  setInvertScale(invert: boolean): void {
+    if (!this.chart) return;
+    try {
+      this.chart.priceScale('right').applyOptions({ invertScale: invert });
+      if (this.drawingEngine) {
+        this.drawingEngine.redraw();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Returns whether invert-scale is currently enabled on the right price scale.
+   */
+  isInvertScale(): boolean {
+    if (!this.chart) return false;
+    try {
+      const opts = this.chart.priceScale('right').options();
+      return opts.invertScale === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Returns the exact pixel width of the right price scale.
+   */
+  getPriceScaleWidth(): number {
+    try {
+      if (this.chart) {
+        const w = this.chart.priceScale('right')?.width?.() ?? 0;
+        if (w > 0) return w;
+      }
+    } catch {
+      /* ignore */
+    }
+    const stub = typeof this.container?.querySelector === 'function'
+      ? this.container.querySelector('tr:first-child td:last-child')
+      : null;
+    return stub && (stub as HTMLElement).clientWidth > 0 ? (stub as HTMLElement).clientWidth : 65;
+  }
+
+  /**
+   * Returns the exact pixel height of the horizontal time scale.
+   */
+  getTimeScaleHeight(): number {
+    try {
+      if (this.chart) {
+        const h = this.chart.timeScale?.()?.height?.() ?? 0;
+        if (h > 0) return h;
+      }
+    } catch {
+      /* ignore */
+    }
+    const stub = typeof this.container?.querySelector === 'function'
+      ? this.container.querySelector('tr:last-child td:first-child')
+      : null;
+    return stub && (stub as HTMLElement).clientHeight > 0 ? (stub as HTMLElement).clientHeight : 26;
+  }
+
+  /**
    * Clear chart data.
    */
   clear(): void {
@@ -575,6 +762,42 @@ export class ChartManager {
   }
 
   /**
+   * Scales the right price scale up or down based on wheel delta at a given Y coordinate.
+   * Wheel up (deltaY < 0) zooms in (stretches vertically); wheel down (deltaY > 0) zooms out (compresses vertically).
+   */
+  zoomPriceScale(deltaY: number, clientY?: number): void {
+    if (!this.chart || !this.candlestickSeries) return;
+    const ps = this.chart.priceScale('right');
+    const vr = ps.getVisibleRange();
+    if (!vr) return;
+
+    const totalSpan = vr.to - vr.from;
+    if (totalSpan <= 0) return;
+
+    let priceAtCursor: number;
+    if (typeof clientY === 'number') {
+      const table = typeof this.container.querySelector === 'function' ? this.container.querySelector('table') : null;
+      const priceScaleTd = table ? table.querySelector('tr:first-child td:last-child') : null;
+      const rect = priceScaleTd?.getBoundingClientRect();
+      const paneY = rect ? clientY - rect.top : clientY - this.container.getBoundingClientRect().top;
+      const p = this.candlestickSeries.coordinateToPrice(paneY);
+      priceAtCursor = p !== null && !isNaN(p) ? p : (vr.from + vr.to) / 2;
+    } else {
+      priceAtCursor = (vr.from + vr.to) / 2;
+    }
+
+    // Zoom factor: smooth exponential scaling based on wheel delta
+    const factor = Math.pow(1.0015, deltaY);
+    const ratio = Math.max(0, Math.min(1, (priceAtCursor - vr.from) / totalSpan));
+    const newSpan = Math.max(totalSpan * factor, 1e-7);
+    const newFrom = priceAtCursor - ratio * newSpan;
+    const newTo = priceAtCursor + (1 - ratio) * newSpan;
+
+    ps.setVisibleRange({ from: newFrom, to: newTo });
+    this.drawingEngine?.redraw();
+  }
+
+  /**
    * Clean up chart and listeners.
    */
   destroy(): void {
@@ -587,6 +810,12 @@ export class ChartManager {
     }
     if (this.onUserWheel) {
       this.container.removeEventListener('wheel', this.onUserWheel);
+    }
+    if (this.onPriceScaleWheel) {
+      this.container.removeEventListener('wheel', this.onPriceScaleWheel, { capture: true });
+    }
+    if (this.onPriceScaleDblClick) {
+      this.container.removeEventListener('dblclick', this.onPriceScaleDblClick);
     }
 
     if (this.resizeRafId !== null) {

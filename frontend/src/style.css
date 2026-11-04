@@ -1538,17 +1538,166 @@ body {
 .replay-speed-wrap {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   background: var(--tv-bg);
   border: 1px solid var(--tv-border);
   border-radius: 6px;
-  padding: 2px 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.replay-speed-wrap:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #363c4e;
+}
+
+.replay-speed-wrap:focus-visible,
+.replay-speed-wrap.open {
+  background: rgba(41, 98, 255, 0.15);
+  border-color: var(--tv-accent, #2962ff);
+  outline: none;
 }
 
 .replay-speed-icon {
   display: flex;
   align-items: center;
   color: var(--tv-fg-muted);
+}
+
+.replay-speed-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tv-fg-bright);
+  line-height: 1;
+}
+
+.replay-speed-chevron {
+  display: flex;
+  align-items: center;
+  color: var(--tv-fg-muted);
+  transition: transform 0.15s ease;
+}
+
+.replay-speed-wrap.open .replay-speed-chevron {
+  transform: rotate(180deg);
+}
+
+.replay-speed-select {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--tv-fg-bright);
+  font-size: 11.5px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+
+.replay-speed-select option {
+  background: #1e222d;
+  color: #d1d4dc;
+}
+
+/* TradingView Replay Speed Popup */
+.tv-speed-popup {
+  position: fixed;
+  background: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+  min-width: 175px;
+  max-height: 380px;
+  overflow-y: auto;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  animation: tvSpeedFadeUp 0.12s cubic-bezier(0, 0, 0.2, 1);
+  z-index: 1000;
+}
+
+@keyframes tvSpeedFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tv-speed-popup::-webkit-scrollbar {
+  width: 5px;
+}
+.tv-speed-popup::-webkit-scrollbar-thumb {
+  background: #363c4e;
+  border-radius: 3px;
+}
+
+.tv-speed-header {
+  padding: 6px 12px 4px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #787b86;
+  border-bottom: 1px solid #2a2e39;
+  margin-bottom: 3px;
+}
+
+.tv-speed-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-speed-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #d1d4dc;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.tv-speed-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.tv-speed-item.active {
+  color: #2962ff;
+  font-weight: 600;
+  background: rgba(41, 98, 255, 0.12);
+}
+
+.tv-speed-check {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #2962ff;
+}
+
+.tv-speed-text {
+  font-weight: 600;
+  min-width: 38px;
+}
+
+.tv-speed-desc {
+  font-size: 11px;
+  color: #787b86;
+  margin-left: auto;
+}
+
+.tv-speed-item.active .tv-speed-desc {
+  color: rgba(41, 98, 255, 0.85);
 }
 
 .replay-mode-wrap {
@@ -1625,16 +1774,6 @@ body {
   background: rgba(120, 123, 134, 0.16);
   color: #b2b5be;
   border: 1px solid rgba(120, 123, 134, 0.35);
-}
-
-.replay-speed-select {
-  background: transparent;
-  border: none;
-  color: var(--tv-fg-bright);
-  font-size: 11.5px;
-  font-weight: 600;
-  outline: none;
-  cursor: pointer;
 }
 
 .replay-jump-input {
@@ -4068,4 +4207,354 @@ input[type="number"] {
   height: 1px;
   background: var(--tv-border);
   margin: 4px 0;
+}
+
+/* ===================================================================
+   TRADINGVIEW CHART CONTEXT MENU & CORNER SETTINGS POPUP (ADR 0007)
+   =================================================================== */
+
+/* Right-Click Context Menu */
+.tv-chart-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 220px;
+  background: rgba(30, 34, 45, 0.98);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--tv-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+  padding: 4px;
+  user-select: none;
+  animation: tvMenuFadeIn 0.12s cubic-bezier(0, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes tvMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.tv-context-menu-item {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-radius: 4px;
+  color: var(--tv-fg);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  outline: none;
+}
+
+.tv-context-menu-item:hover,
+.tv-context-menu-item:focus {
+  background: var(--tv-hover);
+  color: var(--tv-fg-bright);
+}
+
+.tv-context-menu-item.danger:hover {
+  background: rgba(242, 54, 69, 0.18);
+  color: #ff4d4f;
+}
+
+.tv-context-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-context-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--tv-fg-muted);
+}
+
+.tv-context-menu-item:hover .tv-context-item-icon {
+  color: var(--tv-fg-bright);
+}
+
+.tv-context-item-label {
+  font-weight: 400;
+}
+
+.tv-context-shortcut {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--tv-fg-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tv-context-menu-sep {
+  height: 1px;
+  background: var(--tv-border);
+  margin: 4px 6px;
+}
+
+/* Bottom Corner Free Space (Junction below price scale and right of time scale) */
+.tv-chart-corner-area {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 65px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tv-bg);
+  border-top: 1px solid var(--tv-border);
+  border-left: 1px solid var(--tv-border);
+  z-index: 60;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.tv-chart-corner-settings-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--tv-fg-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.tv-chart-corner-settings-btn:hover,
+.tv-chart-corner-settings-btn.active {
+  background: var(--tv-hover);
+  color: var(--tv-fg-bright);
+  border-color: var(--tv-border);
+}
+
+.tv-chart-corner-settings-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Floating Chart Settings Popup Card */
+.tv-chart-floating-popup {
+  position: absolute;
+  right: 6px;
+  bottom: 38px;
+  width: 260px;
+  background: rgba(30, 34, 45, 0.98);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--tv-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.75);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  animation: tvPopupFadeUp 0.15s cubic-bezier(0, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+@keyframes tvPopupFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tv-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tv-border);
+  background: rgba(25, 28, 36, 0.6);
+}
+
+.tv-popup-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tv-popup-title-icon {
+  display: flex;
+  align-items: center;
+  color: var(--tv-accent);
+}
+
+.tv-popup-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tv-fg-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.tv-popup-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--tv-fg-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.tv-popup-close-btn:hover {
+  color: var(--tv-fg-bright);
+  background: var(--tv-hover);
+}
+
+.tv-popup-body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tv-popup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tv-popup-section + .tv-popup-section {
+  padding-top: 6px;
+  border-top: 1px solid var(--tv-border-subtle);
+}
+
+.tv-popup-section-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--tv-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+  padding: 0 4px;
+}
+
+/* Action Buttons inside Popup */
+.tv-popup-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  background: rgba(41, 98, 255, 0.12);
+  border: 1px solid rgba(41, 98, 255, 0.3);
+  border-radius: 5px;
+  color: #60a5fa;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.tv-popup-action-btn:hover {
+  background: var(--tv-accent);
+  color: #ffffff;
+  border-color: var(--tv-accent);
+}
+
+.tv-popup-action-btn.tv-reset-chart-btn {
+  background: rgba(41, 98, 255, 0.18);
+  border-color: rgba(41, 98, 255, 0.45);
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.tv-popup-action-btn.tv-reset-chart-btn:hover {
+  background: var(--tv-accent);
+  color: #ffffff;
+}
+
+.tv-popup-action-btn.secondary {
+  background: transparent;
+  border-color: transparent;
+  color: var(--tv-fg);
+  font-weight: 400;
+}
+
+.tv-popup-action-btn.secondary:hover {
+  background: var(--tv-hover);
+  color: var(--tv-fg-bright);
+}
+
+.tv-popup-action-btn.secondary.danger:hover {
+  background: rgba(242, 54, 69, 0.16);
+  color: #ff4d4f;
+}
+
+.tv-popup-action-btn .btn-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-popup-action-btn .btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.tv-popup-action-btn .shortcut-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: currentColor;
+  opacity: 0.85;
+}
+
+/* Toggle Checkboxes inside Popup */
+.tv-popup-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  color: var(--tv-fg);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.tv-popup-toggle-row:hover {
+  background: var(--tv-hover);
+  color: var(--tv-fg-bright);
+}
+
+.tv-popup-toggle-row input[type="checkbox"] {
+  accent-color: var(--tv-accent);
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  margin: 0;
 }
