@@ -69,6 +69,7 @@ export class PythonBridge {
   private backendUrl = '';
   private ws: WebSocket | null = null;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private authToken: string | null = null;
 
   // Keep-alive settings
   private readonly keepAliveIntervalMs: number;
@@ -335,6 +336,16 @@ export class PythonBridge {
     return this.isSleepingDueToInactivity;
   }
 
+  /** Set active user session bearer token. */
+  setAuthToken(token: string | null): void {
+    this.authToken = token;
+  }
+
+  /** Get active user session bearer token. */
+  getAuthToken(): string | null {
+    return this.authToken;
+  }
+
   // -- Command Execution ----------------------------------------------
 
   /** Invoke a Python slot or API endpoint and await its result. */
@@ -370,9 +381,14 @@ export class PythonBridge {
         body = JSON.stringify(args);
       }
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.authToken) {
+        headers['Authorization'] = `Bearer ${this.authToken}`;
+      }
+
       const res = await fetch(`${this.backendUrl}/api/${method}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: body || undefined,
       });
 

@@ -3,6 +3,9 @@
  */
 
 import type { PythonBridge } from '../bridge/python-bridge';
+import type { AuthStateManager } from '../auth/auth-state';
+import type { PaperTradingModeDialog } from './paper-trading-mode-dialog';
+import type { AuthModal } from './auth-modal';
 import { calculateRiskMetrics } from '../trading/risk-calculator';
 import type {
   AccountSummary,
@@ -40,6 +43,9 @@ export class OrderPanel {
     private readonly bridge: PythonBridge | null,
     private readonly onOrderPlaced?: (order: OrderDefinition) => void,
     onCollapseChange?: (collapsed: boolean) => void,
+    private readonly authState?: AuthStateManager | null,
+    private readonly modeDialog?: PaperTradingModeDialog | null,
+    private readonly authModal?: AuthModal | null,
   ) {
     this.onCollapseChange = onCollapseChange;
     this.container = this.buildWidget();
@@ -703,6 +709,32 @@ export class OrderPanel {
   }
 
   private async submitOrder(side: 'BUY' | 'SELL'): Promise<void> {
+    if (this.authState && this.authState.isGuest() && this.modeDialog) {
+      this.modeDialog.show({
+        onSelectAccount: () => {
+          if (this.authModal) {
+            this.authModal.show({
+              initialTab: 'login',
+              bannerMessage: 'Sign in to save this paper trade to your permanent history.',
+              onSuccess: () => {
+                void this.executeOrderWithParams(side, false);
+              },
+            });
+          }
+        },
+        onSelectDemo: () => {
+          this.authState?.setDemoMode();
+          void this.executeOrderWithParams(side, true);
+        },
+      });
+      return;
+    }
+
+    const isDemo = this.authState ? this.authState.isDemo() : false;
+    await this.executeOrderWithParams(side, isDemo);
+  }
+
+  private async executeOrderWithParams(side: 'BUY' | 'SELL', isDemo: boolean): Promise<void> {
     this.activeSide = side;
 
     let qty = parseFloat(this.container.querySelector<HTMLInputElement>('#order-qty-input')!.value) || 1.0;
@@ -763,16 +795,27 @@ export class OrderPanel {
       stop_loss: finalSl,
       take_profit: finalTp,
       current_market_price: basePrice,
+      is_demo: isDemo,
     };
 
     if (this.bridge) {
       try {
-        const res = await this.bridge.callJson<{ ok: boolean; data?: OrderDefinition }>(
+        const res = await this.bridge.callJson<{ ok: boolean; data?: OrderDefinition; error?: string }>(
           'placeOrder',
           payload,
         );
         if (res.ok && res.data) {
           if (this.onOrderPlaced) this.onOrderPlaced(res.data);
+        } else if (res.error === 'AUTHENTICATION_REQUIRED') {
+          if (this.authModal) {
+            this.authModal.show({
+              initialTab: 'login',
+              bannerMessage: 'An account is required to save trade history.',
+              onSuccess: () => {
+                void this.executeOrderWithParams(side, false);
+              },
+            });
+          }
         }
       } catch {
         /* ignore */

@@ -4,6 +4,9 @@
  */
 
 import type { PythonBridge } from '../bridge/python-bridge';
+import type { AuthStateManager } from '../auth/auth-state';
+import type { PaperTradingModeDialog } from './paper-trading-mode-dialog';
+import type { AuthModal } from './auth-modal';
 import type { OrderDefinition } from '../trading/trading-types';
 import { getIcon } from './icons';
 
@@ -23,6 +26,9 @@ export class QuickTradeOverlay {
     private readonly parent: HTMLElement,
     private readonly bridge: PythonBridge | null,
     private readonly onOrderPlaced?: (order: OrderDefinition) => void,
+    private readonly authState?: AuthStateManager | null,
+    private readonly modeDialog?: PaperTradingModeDialog | null,
+    private readonly authModal?: AuthModal | null,
   ) {
     this.el = this.buildElement();
     this.parent.appendChild(this.el);
@@ -153,26 +159,64 @@ export class QuickTradeOverlay {
   }
 
   private async executeOrder(side: 'BUY' | 'SELL'): Promise<void> {
+    if (this.authState && this.authState.isGuest() && this.modeDialog) {
+      this.modeDialog.show({
+        onSelectAccount: () => {
+          if (this.authModal) {
+            this.authModal.show({
+              initialTab: 'login',
+              bannerMessage: 'Sign in to save this paper trade to your permanent history.',
+              onSuccess: () => {
+                void this.executeOrderWithDemo(side, false);
+              },
+            });
+          }
+        },
+        onSelectDemo: () => {
+          this.authState?.setDemoMode();
+          void this.executeOrderWithDemo(side, true);
+        },
+      });
+      return;
+    }
+
+    const isDemo = this.authState ? this.authState.isDemo() : false;
+    await this.executeOrderWithDemo(side, isDemo);
+  }
+
+  private async executeOrderWithDemo(side: 'BUY' | 'SELL', isDemo: boolean): Promise<void> {
     const qty = this.quantity;
     const basePrice = this.currentPrice;
 
-    const payload: OrderDefinition = {
+    const payload: OrderDefinition & { is_demo?: boolean } = {
       symbol: this.currentSymbol,
       side,
       order_type: 'MARKET',
       quantity: qty,
       current_market_price: basePrice,
+      is_demo: isDemo,
     };
 
     if (this.bridge) {
       try {
-        const res = await this.bridge.callJson<{ ok: boolean; data?: OrderDefinition }>(
+        const res = await this.bridge.callJson<{ ok: boolean; data?: OrderDefinition; error?: string }>(
           'placeOrder',
           payload,
         );
         if (res.ok && res.data) {
           if (this.onOrderPlaced) this.onOrderPlaced(res.data);
           return;
+        } else if (res.error === 'AUTHENTICATION_REQUIRED') {
+          if (this.authModal) {
+            this.authModal.show({
+              initialTab: 'login',
+              bannerMessage: 'An account is required to save trade history.',
+              onSuccess: () => {
+                void this.executeOrderWithDemo(side, false);
+              },
+            });
+            return;
+          }
         }
       } catch {
         /* fallback to browser mode */

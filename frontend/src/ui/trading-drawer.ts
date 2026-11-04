@@ -3,6 +3,8 @@
  */
 
 import type { PythonBridge } from '../bridge/python-bridge';
+import type { AuthStateManager } from '../auth/auth-state';
+import type { AuthModal } from './auth-modal';
 import type { AccountSummary, PositionDefinition, TradeRecord } from '../trading/trading-types';
 import { getIcon } from './icons';
 
@@ -19,6 +21,8 @@ export class TradingDrawer {
     private readonly onModifySlTp?: (pos: PositionDefinition) => void,
     private readonly onPartialClose?: (pos: PositionDefinition, currentPrice: number) => void,
     private readonly onCollapseChange?: (collapsed: boolean) => void,
+    private readonly authState?: AuthStateManager | null,
+    private readonly authModal?: AuthModal | null,
   ) {
     this.onAccountSummaryUpdated = onAccountSummaryUpdated;
     this.container = this.buildDrawer();
@@ -90,6 +94,7 @@ export class TradingDrawer {
         </div>
 
         <div class="trading-content" id="tab-journal-content">
+          <div id="journal-banner-wrap"></div>
           <table class="trading-table">
             <thead>
               <tr>
@@ -173,10 +178,12 @@ export class TradingDrawer {
     if (!this.bridge) return;
 
     try {
+      const isDemo = this.authState ? this.authState.isDemo() : false;
+
       // 1. Fetch Open Positions
       const posRes = await this.bridge.callJson<{ ok: boolean; data?: PositionDefinition[] }>(
         'getOpenPositions',
-        {},
+        { is_demo: isDemo },
       );
       const positions = posRes.ok && Array.isArray(posRes.data) ? posRes.data : [];
       if (this.onPositionsUpdated) {
@@ -186,7 +193,7 @@ export class TradingDrawer {
       // 2. Account Summary
       const accRes = await this.bridge.callJson<{ ok: boolean; data?: AccountSummary }>(
         'getAccountSummary',
-        {},
+        { is_demo: isDemo },
       );
       if (accRes.ok && accRes.data) {
         const acc = accRes.data;
@@ -219,7 +226,7 @@ export class TradingDrawer {
       } else if (this.activeTab === 'journal') {
         const jrnRes = await this.bridge.callJson<{ ok: boolean; data?: TradeRecord[] }>(
           'getTradeJournal',
-          {},
+          { is_demo: isDemo },
         );
         if (jrnRes.ok && Array.isArray(jrnRes.data)) {
           this.renderJournal(jrnRes.data);
@@ -342,6 +349,29 @@ export class TradingDrawer {
   }
 
   private renderJournal(records: TradeRecord[]): void {
+    const bannerWrap = this.container.querySelector('#journal-banner-wrap');
+    if (bannerWrap) {
+      if (this.authState?.isDemo()) {
+        bannerWrap.innerHTML = `
+          <div class="demo-journal-warning-banner">
+            <div class="warning-banner-text">
+              ${getIcon('flask')}
+              <span><strong>Demo Session:</strong> Trades placed in demo mode are temporary and will not be saved to your trade history.</span>
+            </div>
+            <button type="button" class="banner-action-btn" id="save-demo-trades-btn">Save My Trades · Sign In</button>
+          </div>
+        `;
+        bannerWrap.querySelector('#save-demo-trades-btn')?.addEventListener('click', () => {
+          this.authModal?.show({
+            initialTab: 'register',
+            bannerMessage: 'Create an account to save your paper trade history permanently.',
+          });
+        });
+      } else {
+        bannerWrap.innerHTML = '';
+      }
+    }
+
     const tbody = this.container.querySelector('#journal-tbody')!;
     if (records.length === 0) {
       tbody.innerHTML =
@@ -377,26 +407,31 @@ export class TradingDrawer {
 
   private renderAccountCards(acc: AccountSummary): void {
     const grid = this.container.querySelector('#account-card-grid')!;
-    const pnlColor = acc.unrealized_pnl >= 0 ? '#089981' : '#f23645';
+    const balance = acc.balance ?? 0;
+    const equity = acc.equity ?? 0;
+    const unrealizedPnl = acc.unrealized_pnl ?? 0;
+    const marginUsed = acc.margin_used ?? 0;
+    const freeMargin = acc.free_margin ?? 0;
+    const pnlColor = unrealizedPnl >= 0 ? '#089981' : '#f23645';
     const marginLevel =
-      acc.margin_used > 0 ? (acc.equity / acc.margin_used) * 100 : 0;
+      marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
 
     grid.innerHTML = `
       <div class="account-card">
         <span class="account-card-label">Balance</span>
-        <span class="account-card-val">$${acc.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <span class="account-card-val">$${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
       <div class="account-card">
         <span class="account-card-label">Equity</span>
-        <span class="account-card-val">$${acc.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <span class="account-card-val">$${equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
       <div class="account-card">
         <span class="account-card-label">Margin Used</span>
-        <span class="account-card-val">$${acc.margin_used.toFixed(2)}</span>
+        <span class="account-card-val">$${marginUsed.toFixed(2)}</span>
       </div>
       <div class="account-card">
         <span class="account-card-label">Free Margin</span>
-        <span class="account-card-val">$${acc.free_margin.toFixed(2)}</span>
+        <span class="account-card-val">$${freeMargin.toFixed(2)}</span>
       </div>
       <div class="account-card">
         <span class="account-card-label">Margin Level</span>
@@ -404,7 +439,7 @@ export class TradingDrawer {
       </div>
       <div class="account-card">
         <span class="account-card-label">Floating P&L</span>
-        <span class="account-card-val" style="color: ${pnlColor}">${acc.unrealized_pnl >= 0 ? '+' : ''}$${acc.unrealized_pnl.toFixed(2)}</span>
+        <span class="account-card-val" style="color: ${pnlColor}">${unrealizedPnl >= 0 ? '+' : ''}$${unrealizedPnl.toFixed(2)}</span>
       </div>
     `;
   }
