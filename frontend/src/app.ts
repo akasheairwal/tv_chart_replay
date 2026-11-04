@@ -22,6 +22,8 @@ import { TradingDrawer } from './ui/trading-drawer';
 import { Watchlist } from './ui/watchlist';
 import { SlTpConfirmDialog, type SlTpModificationRequest } from './ui/sl-tp-confirm-dialog';
 import { PartialCloseDialog, type PartialCloseRequest } from './ui/partial-close-dialog';
+import { ChartContextMenu } from './ui/chart-context-menu';
+import { ChartCornerSettingsPopup } from './ui/chart-corner-settings';
 import { AuthStateManager } from './auth/auth-state';
 import { PaperTradingModeDialog } from './ui/paper-trading-mode-dialog';
 import { AuthModal } from './ui/auth-modal';
@@ -442,6 +444,17 @@ export class App {
     this.chartCornerSettings?.destroy();
     this.chartCornerSettings = null;
     this.chart.destroy();
+  }
+
+  /**
+   * Dynamically attach a connected Python bridge (e.g. when Render cloud backend finishes waking up).
+   */
+  attachBridge(bridge: PythonBridge): void {
+    this.bridge = bridge;
+    this.subscribeBridgeEvents();
+    if (this.activeSymbol) {
+      void this.requestDataAndLoadHistory();
+    }
   }
 
   private panelTransitionTimer: ReturnType<typeof setTimeout> | null = null;
