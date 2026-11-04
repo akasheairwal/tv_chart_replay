@@ -23,6 +23,8 @@ class Order:
     created_at: float = field(default_factory=time.time)
     filled_at: float | None = None
     filled_price: float | None = None
+    user_id: str = "local_default"
+    is_demo: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,8 @@ class Order:
             "created_at": self.created_at,
             "filled_at": self.filled_at,
             "filled_price": self.filled_price,
+            "user_id": self.user_id,
+            "is_demo": self.is_demo,
         }
 
     @classmethod
@@ -57,6 +61,8 @@ class Order:
             created_at=float(data.get("created_at", time.time())),
             filled_at=float(data["filled_at"]) if data.get("filled_at") is not None else None,
             filled_price=float(data["filled_price"]) if data.get("filled_price") is not None else None,
+            user_id=data.get("user_id", "local_default"),
+            is_demo=bool(data.get("is_demo", False)),
         )
 
 
@@ -106,6 +112,8 @@ class Position:
     opened_at: float = field(default_factory=time.time)
     closed_at: float | None = None
     status: str = "OPEN"  # "OPEN", "CLOSED"
+    user_id: str = "local_default"
+    is_demo: bool = False
 
     def update_pnl(
         self,
@@ -159,6 +167,8 @@ class Position:
             "opened_at": self.opened_at,
             "closed_at": self.closed_at,
             "status": self.status,
+            "user_id": self.user_id,
+            "is_demo": self.is_demo,
         }
 
 

@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSoc
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.application import ApplicationContext, build_context
+from app.auth.models import User
 from app.bridge.commands import BridgeCommandHandler
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,21 @@ def get_handler() -> BridgeCommandHandler:
     if _handler is None:
         raise RuntimeError("API server not initialized")
     return _handler
+
+
+def get_context() -> ApplicationContext:
+    if _context is None:
+        raise RuntimeError("API context not initialized")
+    return _context
+
+
+def get_current_user(request: Request) -> User | None:
+    if _context is None or not hasattr(_context, "auth_service"):
+        return None
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+    return _context.auth_service.authenticate_token(auth_header)
 
 
 @asynccontextmanager
@@ -147,6 +163,119 @@ async def system_ping(request: Request):
     return Response(content=result, media_type="text/plain")
 
 
+# --- Authentication Endpoints (Phase 2) ---
+
+@app.post("/api/auth/register")
+async def auth_register(request: Request):
+    ctx = get_context()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    username = body.get("username", "")
+    email = body.get("email", "")
+    password = body.get("password", "")
+    initial_balance = float(body.get("initial_balance", 10000.0))
+
+    try:
+        user, session = ctx.auth_service.register(
+            username=username,
+            email=email,
+            password=password,
+            initial_balance=initial_balance,
+        )
+        return {"ok": True, "data": {"user": user.to_dict(), "token": session.token}}
+    except ValueError as exc:
+        return Response(
+            content=json.dumps({"ok": False, "error": str(exc)}),
+            status_code=400,
+            media_type="application/json",
+        )
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    ctx = get_context()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    login = body.get("login") or body.get("username") or body.get("email") or ""
+    password = body.get("password", "")
+
+    try:
+        user, session = ctx.auth_service.login(login=login, password=password)
+        return {"ok": True, "data": {"user": user.to_dict(), "token": session.token}}
+    except ValueError as exc:
+        return Response(
+            content=json.dumps({"ok": False, "error": str(exc)}),
+            status_code=401,
+            media_type="application/json",
+        )
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    ctx = get_context()
+    token = request.headers.get("Authorization", "")
+    if not token:
+        try:
+            body = await request.json()
+            token = body.get("token", "")
+        except Exception:
+            pass
+    ctx.auth_service.logout(token)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user = get_current_user(request)
+    if user is None:
+        return Response(
+            content=json.dumps({"ok": False, "error": "UNAUTHENTICATED"}),
+            status_code=401,
+            media_type="application/json",
+        )
+    return {"ok": True, "data": {"user": user.to_dict()}}
+
+
+@app.get("/api/auth/stats")
+def auth_stats(request: Request):
+    ctx = get_context()
+    user = get_current_user(request)
+    if user is None:
+        return Response(
+            content=json.dumps({"ok": False, "error": "UNAUTHENTICATED"}),
+            status_code=401,
+            media_type="application/json",
+        )
+    stats = ctx.trade_journal.get_user_stats(user.id)
+    return {"ok": True, "data": stats}
+
+
+@app.post("/api/auth/reset-account")
+async def auth_reset_account(request: Request):
+    ctx = get_context()
+    user = get_current_user(request)
+    if user is None:
+        return Response(
+            content=json.dumps({"ok": False, "error": "UNAUTHENTICATED"}),
+            status_code=401,
+            media_type="application/json",
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    init_bal = body.get("initial_balance")
+    new_bal = ctx.auth_service.reset_account(user.id, float(init_bal) if init_bal is not None else None)
+    ctx.order_engine.reset_account(new_bal, user_id=user.id, is_demo=False)
+    return {"ok": True, "data": {"balance": new_bal}}
+
+
 @app.post("/api/{command}")
 async def dispatch_command(command: str, request: Request):
     """Generic bridge slot dispatcher matching Qt QWebChannel command surface."""
@@ -157,6 +286,47 @@ async def dispatch_command(command: str, request: Request):
 
     body = await request.body()
     body_str = body.decode("utf-8") if body else ""
+
+    # Intercept trading commands to attach authenticated user or enforce demo/gating
+    if command == "placeOrder" and body_str:
+        try:
+            data = json.loads(body_str) if body_str.startswith("{") else {}
+            is_demo = bool(data.get("is_demo", False))
+            user = get_current_user(request)
+
+            # If user wants to save history (is_demo == False) and has no valid token,
+            # reject with 401 AUTHENTICATION_REQUIRED
+            if not is_demo and user is None:
+                if "user_id" not in data or data["user_id"] == "local_default":
+                    return Response(
+                        content=json.dumps({
+                            "ok": False,
+                            "error": "AUTHENTICATION_REQUIRED",
+                            "message": "An account is required to save trade history. Choose demo mode or sign in.",
+                        }),
+                        status_code=401,
+                        media_type="application/json",
+                    )
+            if user is not None:
+                data["user_id"] = user.id
+                data["is_demo"] = is_demo
+            elif is_demo:
+                data["user_id"] = "demo_user"
+                data["is_demo"] = True
+
+            body_str = json.dumps(data)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    elif command in ("getTradeJournal", "getOpenPositions", "getPendingOrders", "resetAccount"):
+        try:
+            data = json.loads(body_str) if (body_str and body_str.startswith("{")) else {}
+            user = get_current_user(request)
+            if user is not None:
+                data["user_id"] = user.id
+            body_str = json.dumps(data)
+        except Exception:
+            pass
 
     try:
         sig = inspect.signature(fn)

@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 from app.compat import QObject, Signal
 
+from app.auth.repository import SessionRepository, UserRepository
+from app.auth.service import AuthService
 from app.bridge.events import serialize_payload
 from app.config.paths import Paths, get_paths
 from app.config.settings import AppSettings, get_settings
@@ -81,6 +83,9 @@ class ApplicationContext:
     watchlist_manager: WatchlistManager
     trade_journal: TradeJournal
     order_engine: OrderEngine
+    user_repo: UserRepository
+    session_repo: SessionRepository
+    auth_service: AuthService
     provider_registry: ProviderRegistry
     download_manager: DownloadManager
     replay_engine: ReplayEngine
@@ -123,6 +128,10 @@ def build_context(
     event_relay = BridgeEventRelay()
     order_engine = OrderEngine(trade_journal, emit=event_relay.emit_event)
 
+    user_repo = UserRepository(conn)
+    session_repo = SessionRepository(conn)
+    auth_service = AuthService(user_repo, session_repo)
+
     providers: list[DataProvider] = [DukascopyProvider(), YahooProvider(), BinanceProvider()]
     provider_registry = ProviderRegistry(providers)
 
@@ -152,6 +161,9 @@ def build_context(
         watchlist_manager=watchlist_manager,
         trade_journal=trade_journal,
         order_engine=order_engine,
+        user_repo=user_repo,
+        session_repo=session_repo,
+        auth_service=auth_service,
         provider_registry=provider_registry,
         download_manager=download_manager,
         replay_engine=replay_engine,

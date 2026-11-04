@@ -1,6 +1,9 @@
 """
 Order Engine — paper trading order execution & risk manager (Architecture §70–71).
+Supports multi-user scoping and ephemeral (zero DB write) demo paper trading.
 """
+
+from __future__ import annotations
 
 import threading
 import time
@@ -60,18 +63,34 @@ class OrderEngine:
         self.emit = emit
         self.orders: dict[str, Order] = {}
         self.positions: dict[str, Position] = {}
+        self._demo_trades: list[dict[str, Any]] = []
         self._latest_prices: dict[str, float] = {}
         self._current_replay_timestamp: float = 0.0
         self._lock = threading.Lock()
 
-    def reset_account(self, initial_balance: float = 10000.0) -> AccountSummary:
+    def reset_account(
+        self,
+        initial_balance: float = 10000.0,
+        user_id: str | None = None,
+        is_demo: bool = False,
+    ) -> AccountSummary:
         with self._lock:
             self.account = AccountSummary(balance=initial_balance, equity=initial_balance, free_margin=initial_balance)
-            self.orders.clear()
-            self.positions.clear()
-            self._latest_prices.clear()
-            self._current_replay_timestamp = 0.0
-            self.journal.clear()
+            if is_demo:
+                self.orders = {k: v for k, v in self.orders.items() if not v.is_demo}
+                self.positions = {k: v for k, v in self.positions.items() if not v.is_demo}
+                self._demo_trades.clear()
+            elif user_id is not None:
+                self.orders = {k: v for k, v in self.orders.items() if v.user_id != user_id}
+                self.positions = {k: v for k, v in self.positions.items() if v.user_id != user_id}
+                self.journal.clear(user_id=user_id)
+            else:
+                self.orders.clear()
+                self.positions.clear()
+                self._demo_trades.clear()
+                self._latest_prices.clear()
+                self._current_replay_timestamp = 0.0
+                self.journal.clear()
             res = self.account
 
         if self.emit:
@@ -91,6 +110,8 @@ class OrderEngine:
         trailing_stop_pips: float | None = None,
         current_market_price: float = 0.0,
         timestamp: float = 0.0,
+        user_id: str = "local_default",
+        is_demo: bool = False,
     ) -> Order:
         order_id = f"ord_{uuid.uuid4().hex[:8]}"
         side_clean = side.upper()
@@ -117,6 +138,8 @@ class OrderEngine:
             trailing_stop_pips=trailing_stop_pips,
             status="PENDING",
             created_at=exec_timestamp,
+            user_id=user_id,
+            is_demo=is_demo,
         )
 
         with self._lock:
@@ -147,7 +170,7 @@ class OrderEngine:
     def close_position(
         self,
         position_id: str,
-        current_price: float,
+        current_price: float = 0.0,
         reason: str = "MANUAL",
         close_quantity: float | None = None,
     ) -> dict[str, Any] | None:
@@ -155,13 +178,15 @@ class OrderEngine:
             pos = self.positions.get(position_id)
             if not pos or pos.status != "OPEN":
                 return None
-            record = self._close_position_internal(pos, current_price, reason, close_quantity)
+
+            exec_price = current_price if current_price > 0 else self._latest_prices.get(pos.symbol, pos.entry_price)
+            record = self._close_position_internal(pos, exec_price, reason, close_quantity)
 
         if self.emit:
             self.emit("trading.account", self.get_account_summary())
             self.emit("trading.positions", self.get_open_positions())
-            if record:
-                self.emit("trading.position_closed", record)
+            self.emit("trading.position_closed", record)
+
         return record
 
     def modify_position(
@@ -296,6 +321,8 @@ class OrderEngine:
             highest_price=fill_price,
             lowest_price=fill_price,
             opened_at=timestamp if timestamp > 0 else (self._current_replay_timestamp if self._current_replay_timestamp > 0 else time.time()),
+            user_id=order.user_id,
+            is_demo=order.is_demo,
         )
         self.positions[pos_id] = pos
 
@@ -346,32 +373,85 @@ class OrderEngine:
 
         trade_id = f"{pos.position_id}_partial_{int(time.time()*1000)}" if is_partial else pos.position_id
 
-        record = self.journal.record_trade(
-            trade_id=trade_id,
-            symbol=pos.symbol,
-            side=pos.side,
-            quantity=qty_to_close,
-            entry_price=pos.entry_price,
-            exit_price=close_price,
-            pnl=pnl,
-            commission=self.commission_per_trade,
-            opened_at=pos.opened_at,
-            closed_at=closed_ts,
-            exit_reason=exit_rsn,
-        )
+        if pos.is_demo:
+            pnl_pct = ((close_price - pos.entry_price) / pos.entry_price * 100.0) if pos.entry_price > 0 else 0.0
+            if pos.side.upper() in ("SHORT", "SELL"):
+                pnl_pct = -pnl_pct
+            record = {
+                "id": trade_id,
+                "user_id": pos.user_id,
+                "session_id": "demo_session",
+                "symbol": pos.symbol,
+                "side": pos.side,
+                "quantity": qty_to_close,
+                "entry_price": pos.entry_price,
+                "exit_price": close_price,
+                "pnl": round(pnl, 2),
+                "pnl_percent": round(pnl_pct, 2),
+                "commission": round(self.commission_per_trade, 2),
+                "opened_at": pos.opened_at,
+                "closed_at": closed_ts,
+                "exit_reason": exit_rsn,
+                "is_demo": True,
+            }
+            self._demo_trades.append(record)
+        else:
+            record = self.journal.record_trade(
+                trade_id=trade_id,
+                symbol=pos.symbol,
+                side=pos.side,
+                quantity=qty_to_close,
+                entry_price=pos.entry_price,
+                exit_price=close_price,
+                pnl=pnl,
+                commission=self.commission_per_trade,
+                opened_at=pos.opened_at,
+                closed_at=closed_ts,
+                exit_reason=exit_rsn,
+                user_id=pos.user_id,
+            )
 
         if not is_partial:
             self.positions.pop(pos.position_id, None)
 
         return record
 
-    def get_open_positions(self) -> list[dict[str, Any]]:
+    def get_open_positions(
+        self,
+        user_id: str | None = None,
+        is_demo: bool | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
-            return [p.to_dict() for p in self.positions.values() if p.status == "OPEN"]
+            res = [p for p in self.positions.values() if p.status == "OPEN"]
+            if user_id is not None:
+                res = [p for p in res if p.user_id == user_id]
+            if is_demo is not None:
+                res = [p for p in res if p.is_demo == is_demo]
+            return [p.to_dict() for p in res]
 
-    def get_pending_orders(self) -> list[dict[str, Any]]:
+    def get_pending_orders(
+        self,
+        user_id: str | None = None,
+        is_demo: bool | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
-            return [o.to_dict() for o in self.orders.values() if o.status == "PENDING"]
+            res = [o for o in self.orders.values() if o.status == "PENDING"]
+            if user_id is not None:
+                res = [o for o in res if o.user_id == user_id]
+            if is_demo is not None:
+                res = [o for o in res if o.is_demo == is_demo]
+            return [o.to_dict() for o in res]
+
+    def get_trades(
+        self,
+        limit: int = 100,
+        user_id: str | None = None,
+        is_demo: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            if is_demo:
+                return list(reversed(self._demo_trades))[:limit]
+            return self.journal.get_trades(limit=limit, user_id=user_id)
 
     def get_account_summary(self) -> dict[str, Any]:
         with self._lock:

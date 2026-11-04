@@ -10,6 +10,7 @@ from app.auth.crypto import (
 )
 from app.auth.models import User, UserSession, UserTradingStats
 from app.auth.repository import SessionRepository, UserRepository
+from app.auth.service import AuthService
 
 __all__ = [
     "User",
@@ -17,9 +18,9 @@ __all__ = [
     "UserTradingStats",
     "UserRepository",
     "SessionRepository",
+    "AuthService",
     "hash_password",
     "verify_password",
     "generate_session_token",
     "generate_user_id",
 ]
-

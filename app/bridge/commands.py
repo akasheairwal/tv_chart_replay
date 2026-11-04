@@ -634,6 +634,8 @@ class BridgeCommandHandler(QObject):
                 trailing_stop_pips=data.get("trailing_stop_pips"),
                 current_market_price=mkt_price,
                 timestamp=float(data.get("timestamp", 0.0)),
+                user_id=str(data.get("user_id", "local_default")),
+                is_demo=bool(data.get("is_demo", False)),
             )
             return order.to_dict()
 
@@ -718,7 +720,17 @@ class BridgeCommandHandler(QObject):
         def action():
             if self._services is None or not hasattr(self._services, "order_engine"):
                 return []
-            return self._services.order_engine.get_open_positions()
+            user_id = None
+            is_demo = None
+            if payload_json and payload_json.startswith("{"):
+                try:
+                    data = json.loads(payload_json)
+                    user_id = data.get("user_id")
+                    if "is_demo" in data:
+                        is_demo = bool(data["is_demo"])
+                except Exception:
+                    pass
+            return self._services.order_engine.get_open_positions(user_id=user_id, is_demo=is_demo)
 
         return self._envelope(action)
 
@@ -728,7 +740,17 @@ class BridgeCommandHandler(QObject):
         def action():
             if self._services is None or not hasattr(self._services, "order_engine"):
                 return []
-            return self._services.order_engine.get_pending_orders()
+            user_id = None
+            is_demo = None
+            if payload_json and payload_json.startswith("{"):
+                try:
+                    data = json.loads(payload_json)
+                    user_id = data.get("user_id")
+                    if "is_demo" in data:
+                        is_demo = bool(data["is_demo"])
+                except Exception:
+                    pass
+            return self._services.order_engine.get_pending_orders(user_id=user_id, is_demo=is_demo)
 
         return self._envelope(action)
 
@@ -736,9 +758,24 @@ class BridgeCommandHandler(QObject):
     @Slot(result=str)
     def getTradeJournal(self, payload_json: str = "") -> str:
         def action():
-            if self._services is None or not hasattr(self._services, "trade_journal"):
+            if self._services is None:
                 return []
-            return self._services.trade_journal.get_trades()
+            user_id = None
+            is_demo = False
+            limit = 100
+            if payload_json and payload_json.startswith("{"):
+                try:
+                    data = json.loads(payload_json)
+                    user_id = data.get("user_id")
+                    is_demo = bool(data.get("is_demo", False))
+                    limit = int(data.get("limit", 100))
+                except Exception:
+                    pass
+            if hasattr(self._services, "order_engine") and hasattr(self._services.order_engine, "get_trades"):
+                return self._services.order_engine.get_trades(limit=limit, user_id=user_id, is_demo=is_demo)
+            if hasattr(self._services, "trade_journal"):
+                return self._services.trade_journal.get_trades(limit=limit, user_id=user_id)
+            return []
 
         return self._envelope(action)
 
@@ -750,6 +787,8 @@ class BridgeCommandHandler(QObject):
             if self._services is None or not hasattr(self._services, "order_engine"):
                 raise RuntimeError("order engine unavailable")
             balance = 10000.0
+            user_id = None
+            is_demo = False
             if isinstance(initial_balance_or_json, (int, float)):
                 balance = float(initial_balance_or_json)
             elif isinstance(initial_balance_or_json, str) and initial_balance_or_json:
@@ -759,10 +798,90 @@ class BridgeCommandHandler(QObject):
                         balance = float(parsed)
                     elif isinstance(parsed, dict):
                         balance = float(parsed.get("initial_balance", 10000.0))
+                        user_id = parsed.get("user_id")
+                        is_demo = bool(parsed.get("is_demo", False))
                 except (ValueError, TypeError, json.JSONDecodeError):
                     pass
-            summary = self._services.order_engine.reset_account(balance)
+            summary = self._services.order_engine.reset_account(balance, user_id=user_id, is_demo=is_demo)
             return summary.to_dict()
+
+        return self._envelope(action)
+
+    # -- authentication (Phase 2) -----------------------------------
+
+    @Slot(str, result=str)
+    def authRegister(self, payload_json: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "auth_service"):
+                raise RuntimeError("auth service unavailable")
+            data = json.loads(payload_json)
+            user, session = self._services.auth_service.register(
+                username=data.get("username", ""),
+                email=data.get("email", ""),
+                password=data.get("password", ""),
+                initial_balance=float(data.get("initial_balance", 10000.0)),
+            )
+            return {"user": user.to_dict(), "token": session.token}
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    def authLogin(self, payload_json: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "auth_service"):
+                raise RuntimeError("auth service unavailable")
+            data = json.loads(payload_json)
+            user, session = self._services.auth_service.login(
+                login=data.get("login") or data.get("username") or data.get("email") or "",
+                password=data.get("password", ""),
+            )
+            return {"user": user.to_dict(), "token": session.token}
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    def authLogout(self, payload_json: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "auth_service"):
+                return {"logged_out": False}
+            token = payload_json
+            if payload_json.startswith("{"):
+                token = json.loads(payload_json).get("token", "")
+            elif payload_json.startswith('"') and payload_json.endswith('"'):
+                token = json.loads(payload_json)
+            ok = self._services.auth_service.logout(token)
+            return {"logged_out": ok}
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    def authGetMe(self, token_or_payload: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "auth_service"):
+                raise RuntimeError("auth service unavailable")
+            tok = token_or_payload
+            if token_or_payload.startswith("{"):
+                tok = json.loads(token_or_payload).get("token", "")
+            elif token_or_payload.startswith('"') and token_or_payload.endswith('"'):
+                tok = json.loads(token_or_payload)
+            user = self._services.auth_service.authenticate_token(tok)
+            if user is None:
+                raise ValueError("Unauthorized or session expired")
+            return {"user": user.to_dict()}
+
+        return self._envelope(action)
+
+    @Slot(str, result=str)
+    def authGetUserStats(self, user_id_or_payload: str) -> str:
+        def action():
+            if self._services is None or not hasattr(self._services, "trade_journal"):
+                return {}
+            uid = user_id_or_payload
+            if user_id_or_payload.startswith("{"):
+                uid = json.loads(user_id_or_payload).get("user_id", "")
+            elif user_id_or_payload.startswith('"') and user_id_or_payload.endswith('"'):
+                uid = json.loads(user_id_or_payload)
+            return self._services.trade_journal.get_user_stats(uid)
 
         return self._envelope(action)
 
