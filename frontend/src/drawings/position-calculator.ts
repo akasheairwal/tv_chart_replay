@@ -137,10 +137,10 @@ export function detectSymbolSpec(symbol = '', referencePrice = 1.0): SymbolSpec 
   }
 
   // 7. Standard Forex Pairs (EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD, USDCHF, etc.)
-  const fxPairs = ['EUR', 'GBP', 'AUD', 'NZD', 'USD', 'CAD', 'CHF'];
-  const matchesFx = fxPairs.some((curr) => clean.startsWith(curr)) && clean.length === 6;
+  const fxCurrencies = ['EUR', 'GBP', 'AUD', 'NZD', 'USD', 'CAD', 'CHF', 'JPY', 'SGD', 'HKD', 'TRY', 'MXN', 'SEK', 'NOK', 'PLN', 'CNH', 'ZAR'];
+  const matchesFx = clean.length === 6 && fxCurrencies.some((curr) => clean.startsWith(curr)) && fxCurrencies.some((curr) => clean.endsWith(curr));
 
-  if (matchesFx || (referencePrice < 50 && referencePrice > 0.1)) {
+  if (matchesFx) {
     return {
       symbol: clean || 'EURUSD',
       assetClass: 'forex',

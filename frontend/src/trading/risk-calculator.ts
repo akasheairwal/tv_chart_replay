@@ -1,13 +1,30 @@
 /**
  * Exness-style Risk Calculator core engine.
- * Computes lot size, pip values, risk/reward amounts, target SL/TP prices, and required margin.
+ * Computes lot size, pip values, risk/reward amounts, target SL/TP prices, and required margin (ADR 0011).
  */
 
 import type { RiskCalculationParams, RiskCalculationResult } from './trading-types';
 
+const FOREX_CURRENCIES = new Set([
+  'EUR', 'USD', 'GBP', 'AUD', 'NZD', 'CAD', 'CHF', 'JPY',
+  'SGD', 'HKD', 'TRY', 'MXN', 'SEK', 'NOK', 'PLN', 'CNH', 'ZAR',
+]);
+
+const CRYPTO_TOKENS = new Set([
+  'BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'BNB', 'AVAX',
+  'DOT', 'LINK', 'MATIC', 'NEAR', 'LTC', 'BCH', 'UNI', 'ATOM',
+  'SHIB', 'PEPE', 'ALGO', 'FTM', 'FIL', 'TRX',
+]);
+
+const INDEX_TOKENS = new Set([
+  'SPX', 'US500', 'NAS100', 'NDX', 'US30', 'DJI', 'DJ30',
+  'GER40', 'DAX', 'UK100', 'JP225', 'NIKKEI',
+]);
+
 export function getSymbolContractDetails(symbol: string, price: number): { contractSize: number; pipSize: number } {
   const sym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+  // 1. Precious Metals & Commodities
   if (sym.includes('XAU') || sym.includes('GOLD')) {
     return { contractSize: 100.0, pipSize: 0.01 };
   }
@@ -16,19 +33,50 @@ export function getSymbolContractDetails(symbol: string, price: number): { contr
     return { contractSize: 5000.0, pipSize: 0.001 };
   }
 
-  if (sym.includes('BTC') || sym.includes('ETH')) {
-    return { contractSize: 1.0, pipSize: 1.0 };
+  if (sym.includes('OIL') || sym.includes('WTI') || sym.includes('BRENT') || sym.includes('USOIL') || sym.includes('UKOIL')) {
+    return { contractSize: 1000.0, pipSize: 0.01 };
   }
 
-  if (sym.includes('JPY')) {
-    return { contractSize: 100_000.0, pipSize: 0.01 };
+  // 2. Stock Indices
+  for (const idx of INDEX_TOKENS) {
+    if (sym.includes(idx)) {
+      return { contractSize: 1.0, pipSize: 0.1 };
+    }
   }
 
+  // 3. Cryptocurrencies
+  let isCrypto = false;
+  for (const tok of CRYPTO_TOKENS) {
+    if (sym.includes(tok)) {
+      isCrypto = true;
+      break;
+    }
+  }
+  if (isCrypto || sym.endsWith('USDT') || sym.endsWith('USDC') || price > 10000) {
+    let pip = 0.0001;
+    if (price >= 1000) pip = 1.0;
+    else if (price >= 1) pip = 0.01;
+    return { contractSize: 1.0, pipSize: pip };
+  }
+
+  // 4. Forex Currency Pairs (Strict ISO 4217 Pair Validation)
+  if (sym.length === 6) {
+    const base = sym.substring(0, 3);
+    const quote = sym.substring(3, 6);
+    if (FOREX_CURRENCIES.has(base) && FOREX_CURRENCIES.has(quote)) {
+      if (sym.includes('JPY')) {
+        return { contractSize: 100_000.0, pipSize: 0.01 };
+      }
+      return { contractSize: 100_000.0, pipSize: 0.0001 };
+    }
+  }
+
+  // 5. Equities / Stocks / Fallback (e.g. AAPL, TSLA, NVDA)
   if (price > 1000) {
     return { contractSize: 1.0, pipSize: 1.0 };
   }
 
-  return { contractSize: 100_000.0, pipSize: 0.0001 };
+  return { contractSize: 1.0, pipSize: price >= 1 ? 0.01 : 0.0001 };
 }
 
 export function computePipValuePerLot(symbol: string, price: number): number {

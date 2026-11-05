@@ -1,11 +1,27 @@
 """
-Trade Simulation Data Models (Architecture §70–71 / Phase 10).
+Trade Simulation Data Models (Architecture §70–71 / ADR 0011).
 """
 
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+FOREX_CURRENCIES = {
+    "EUR", "USD", "GBP", "AUD", "NZD", "CAD", "CHF", "JPY",
+    "SGD", "HKD", "TRY", "MXN", "SEK", "NOK", "PLN", "CNH", "ZAR",
+}
+
+CRYPTO_TOKENS = {
+    "BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "BNB", "AVAX",
+    "DOT", "LINK", "MATIC", "NEAR", "LTC", "BCH", "UNI", "ATOM",
+    "SHIB", "PEPE", "ALGO", "FTM", "FIL", "TRX",
+}
+
+INDEX_TOKENS = {
+    "SPX", "US500", "NAS100", "NDX", "US30", "DJI", "DJ30",
+    "GER40", "DAX", "UK100", "JP225", "NIKKEI",
+}
 
 
 @dataclass
@@ -25,6 +41,8 @@ class Order:
     filled_price: float | None = None
     user_id: str = "local_default"
     is_demo: bool = False
+    leverage: float = 100.0
+    required_margin: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +61,8 @@ class Order:
             "filled_price": self.filled_price,
             "user_id": self.user_id,
             "is_demo": self.is_demo,
+            "leverage": self.leverage,
+            "required_margin": round(self.required_margin, 2),
         }
 
     @classmethod
@@ -63,25 +83,78 @@ class Order:
             filled_price=float(data["filled_price"]) if data.get("filled_price") is not None else None,
             user_id=data.get("user_id", "local_default"),
             is_demo=bool(data.get("is_demo", False)),
+            leverage=float(data.get("leverage", 100.0)),
+            required_margin=float(data.get("required_margin", 0.0)),
         )
 
 
+def get_default_leverage(symbol: str) -> float:
+    """Return institutional standard default leverage for an asset class (ADR 0011)."""
+    sym = symbol.upper().replace("=X", "").replace("-USD", "").replace("/", "").replace("_", "").replace("-", "").strip()
+    if any(m in sym for m in ("XAU", "GOLD", "XAG", "SILVER", "OIL", "WTI", "BRENT", "USOIL", "UKOIL")):
+        return 50.0
+    if any(idx in sym for idx in INDEX_TOKENS):
+        return 20.0
+    if any(tok in sym for tok in CRYPTO_TOKENS) or sym.endswith("USDT") or sym.endswith("USDC"):
+        return 20.0
+    if len(sym) == 6 and sym[:3] in FOREX_CURRENCIES and sym[3:6] in FOREX_CURRENCIES:
+        return 100.0
+    return 5.0
+
+
 def get_symbol_contract_details(symbol: str, price: float = 0.0) -> tuple[float, float]:
-    """Return (contract_size, pip_size) matching the frontend risk calculator contract specifications."""
-    sym = symbol.upper().replace("=X", "").replace("-USD", "").replace("/", "")
+    """Return (contract_size, pip_size) matching ADR 0011 specification matrix."""
+    sym = symbol.upper().replace("=X", "").replace("-USD", "").replace("/", "").replace("_", "").replace("-", "").strip()
+
+    # 1. Precious Metals & Commodities
     if "XAU" in sym or "GOLD" in sym:
         return 100.0, 0.01
     if "XAG" in sym or "SILVER" in sym:
         return 5000.0, 0.001
-    if "BTC" in sym or "ETH" in sym:
-        return 1.0, 1.0
-    if "JPY" in sym:
-        return 100_000.0, 0.01
-    if len(sym) == 6 and sym.isalpha():
+    if any(c in sym for c in ("OIL", "WTI", "BRENT", "USOIL", "UKOIL")):
+        return 1000.0, 0.01
+
+    # 2. Stock Indices
+    if any(idx in sym for idx in INDEX_TOKENS):
+        return 1.0, 0.1
+
+    # 3. Cryptocurrencies (BTC, ETH, SOL, XRP, DOGE, etc., or ending with USDT / USDC / USD)
+    is_crypto = (
+        any(tok in sym for tok in CRYPTO_TOKENS)
+        or sym.endswith("USDT")
+        or sym.endswith("USDC")
+        or (sym.endswith("USD") and any(sym.startswith(tok) for tok in CRYPTO_TOKENS))
+        or price > 10000.0
+    )
+    if is_crypto:
+        if price >= 1000.0:
+            pip = 1.0
+        elif price >= 1.0:
+            pip = 0.01
+        else:
+            pip = 0.0001
+        return 1.0, pip
+
+    # 4. Forex Currency Pairs (Strict ISO 4217 Pair Validation)
+    if len(sym) == 6 and sym[:3] in FOREX_CURRENCIES and sym[3:6] in FOREX_CURRENCIES:
+        if "JPY" in sym:
+            return 100_000.0, 0.01
         return 100_000.0, 0.0001
+
+    # 5. Equities / Stocks / Fallback (e.g. AAPL, TSLA, NVDA)
     if price > 1000.0:
         return 1.0, 1.0
-    return 1.0, 0.01 if price > 50.0 else 0.0001
+    return 1.0, 0.01 if price >= 1.0 else 0.0001
+
+
+def calculate_required_margin(
+    symbol: str, quantity: float, price: float, leverage: float | None = None
+) -> float:
+    """Calculate required margin collateral for an order/position."""
+    contract_size, _ = get_symbol_contract_details(symbol, price)
+    eff_leverage = leverage if (leverage is not None and leverage > 0) else get_default_leverage(symbol)
+    notional = quantity * contract_size * price
+    return round(notional / eff_leverage, 2)
 
 
 def get_pip_size(symbol: str, price: float = 0.0) -> float:
@@ -114,6 +187,8 @@ class Position:
     status: str = "OPEN"  # "OPEN", "CLOSED"
     user_id: str = "local_default"
     is_demo: bool = False
+    leverage: float = 100.0
+    required_margin: float = 0.0
 
     def update_pnl(
         self,
@@ -169,6 +244,8 @@ class Position:
             "status": self.status,
             "user_id": self.user_id,
             "is_demo": self.is_demo,
+            "leverage": self.leverage,
+            "required_margin": round(self.required_margin, 2),
         }
 
 
@@ -178,6 +255,7 @@ class AccountSummary:
     equity: float = 10000.0
     margin_used: float = 0.0
     free_margin: float = 10000.0
+    margin_level: float = 0.0  # Percentage e.g. 500.0% (0.0 means 0 margin used / safe)
     unrealized_pnl: float = 0.0
     realized_pnl: float = 0.0
     total_trades: int = 0
@@ -188,6 +266,10 @@ class AccountSummary:
     def update_totals(self) -> None:
         self.equity = round(self.balance + self.unrealized_pnl, 2)
         self.free_margin = round(self.equity - self.margin_used, 2)
+        if self.margin_used > 0:
+            self.margin_level = round((self.equity / self.margin_used) * 100.0, 1)
+        else:
+            self.margin_level = 0.0
         if self.total_trades > 0:
             self.win_rate = round((self.winning_trades / self.total_trades) * 100.0, 1)
         else:
@@ -200,6 +282,7 @@ class AccountSummary:
             "equity": round(self.equity, 2),
             "margin_used": round(self.margin_used, 2),
             "free_margin": round(self.free_margin, 2),
+            "margin_level": round(self.margin_level, 1),
             "unrealized_pnl": round(self.unrealized_pnl, 2),
             "realized_pnl": round(self.realized_pnl, 2),
             "total_trades": self.total_trades,

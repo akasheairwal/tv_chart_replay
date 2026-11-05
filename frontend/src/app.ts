@@ -29,6 +29,7 @@ import { PaperTradingModeDialog } from './ui/paper-trading-mode-dialog';
 import { AuthModal } from './ui/auth-modal';
 import { UserNavWidget } from './ui/user-nav-widget';
 import type { PositionDefinition } from './trading/trading-types';
+import { getSymbolContractDetails } from './trading/risk-calculator';
 
 interface RequestResponse {
   ok: boolean;
@@ -355,6 +356,7 @@ export class App {
         () => this.handlePanelTransition(),
         this.authState,
         this.authModal,
+        (msg) => this.showToast(msg),
       );
       this.tradingDrawer.start();
     }
@@ -598,14 +600,15 @@ export class App {
       const pos = this.inMemoryPositions[idx];
       const isLong = pos.side === 'LONG' || (pos.side as string) === 'BUY';
       const diff = (currentPrice - pos.entry_price) * (isLong ? 1 : -1);
-      const mult = pos.entry_price < 50 ? 100000 : 1;
-      const pnl = diff * pos.quantity * mult;
+      const { contractSize } = getSymbolContractDetails(pos.symbol, pos.entry_price);
+      const pnl = diff * pos.quantity * contractSize;
       this.inMemoryPositions.splice(idx, 1);
       this.chart.setPositions(this.inMemoryPositions);
       if (this.orderPanel) {
         this.orderPanel.setPositions(this.inMemoryPositions);
       }
       if (this.tradingDrawer) {
+        this.tradingDrawer.applyRealizedPnl(pnl);
         this.tradingDrawer.setInMemoryPositions(this.inMemoryPositions);
       }
       this.showToast(`🔒 Position Closed · PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`);
@@ -731,6 +734,16 @@ export class App {
     }
 
     if (!this.bridge && this.inMemoryPositions.length > 0) {
+      // 1. Update unrealized pnl for open positions
+      for (const pos of this.inMemoryPositions) {
+        const isLong = pos.side === 'LONG' || (pos.side as string) === 'BUY';
+        const diff = (price - pos.entry_price) * (isLong ? 1 : -1);
+        const { contractSize } = getSymbolContractDetails(pos.symbol, pos.entry_price);
+        pos.current_price = price;
+        pos.unrealized_pnl = Math.round(diff * pos.quantity * contractSize * 100) / 100;
+      }
+
+      // 2. Check SL and TP
       const closedPosIds: string[] = [];
       for (const pos of this.inMemoryPositions) {
         const isLong = pos.side === 'LONG' || (pos.side as string) === 'BUY';
@@ -753,6 +766,23 @@ export class App {
       }
       for (const id of closedPosIds) {
         this.handleBrowserClosePosition(id, price);
+      }
+
+      // 3. Check Stop-Out / Force Liquidation (ADR 0011)
+      if (this.tradingDrawer && this.inMemoryPositions.length > 0) {
+        const curAcc = this.tradingDrawer.getCurrentAccount();
+        const totalUnrealized = this.inMemoryPositions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
+        const marginUsed = this.inMemoryPositions.reduce((s, p) => s + (p.required_margin || 0), 0);
+        const curEquity = curAcc.balance + totalUnrealized;
+        const marginLevel = marginUsed > 0 ? (curEquity / marginUsed) * 100 : 999;
+
+        if (marginLevel <= 30 || curEquity <= 0) {
+          this.showToast('🚨 FORCE LIQUIDATION: Stop-Out Executed (Margin Level <= 30%)', 5000);
+          const sorted = [...this.inMemoryPositions].sort((a, b) => (a.unrealized_pnl || 0) - (b.unrealized_pnl || 0));
+          for (const p of sorted) {
+            this.handleBrowserClosePosition(p.position_id, price);
+          }
+        }
       }
     }
   }
@@ -1150,6 +1180,16 @@ export class App {
 
     this.bridge.onEvent('trading.orders', () => {
       void this.tradingDrawer?.refresh();
+    });
+
+    this.bridge.onEvent('trading.liquidation', (payload: unknown) => {
+      const data = payload as { reason?: string; final_balance?: number; final_equity?: number; is_demo?: boolean };
+      const mode = data?.is_demo ? 'Demo' : 'Paper';
+      this.showToast(
+        `🚨 STOP-OUT LIQUIDATION (${mode}): Margin Level dropped below 30%! Positions force-closed to protect account solvency.`,
+        6000,
+      );
+      void this.refreshPositions();
     });
   }
 

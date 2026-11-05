@@ -37,6 +37,11 @@ export class TradingDrawer {
   private currentHeight = 200;
   private isMaximized = false;
 
+  private isDemoMode(): boolean {
+    if (!this.authState) return true;
+    return this.authState.isDemo() || this.authState.isGuest() || !this.authState.isAuthenticated();
+  }
+
   constructor(
     parent: HTMLElement,
     private readonly bridge: PythonBridge | null,
@@ -59,10 +64,37 @@ export class TradingDrawer {
       }
     }
 
+    // Restore demo balance from sessionStorage if in demo/guest mode
+    if (typeof sessionStorage !== 'undefined' && this.isDemoMode()) {
+      const savedDemoBal = sessionStorage.getItem('demo_account_balance');
+      if (savedDemoBal) {
+        const bal = parseFloat(savedDemoBal);
+        if (!isNaN(bal) && bal > 0) {
+          this.currentAccount.balance = bal;
+          this.currentAccount.equity = bal;
+          this.currentAccount.free_margin = bal;
+        }
+      }
+    }
+
     this.container = this.buildDrawer();
     parent.appendChild(this.container);
     this.applyHeight(this.currentHeight);
     this.updateMetrics(this.currentAccount, 0, 0);
+
+    // Synchronize with active authentication state changes
+    if (this.authState) {
+      this.authState.subscribe((mode, user) => {
+        if (mode === 'authenticated' && user && typeof user.balance === 'number') {
+          this.currentAccount.balance = user.balance;
+          this.currentAccount.equity = Math.round((user.balance + this.currentAccount.unrealized_pnl) * 100) / 100;
+          this.currentAccount.free_margin = Math.round((this.currentAccount.equity - this.currentAccount.margin_used) * 100) / 100;
+          this.updateMetrics(this.currentAccount, this.currentPositions.length, 0);
+          this.renderAccountCards(this.currentAccount);
+        }
+        void this.refresh();
+      });
+    }
   }
 
   private buildDrawer(): HTMLElement {
@@ -513,19 +545,51 @@ export class TradingDrawer {
     }
   }
 
+  getCurrentAccount(): AccountSummary {
+    return { ...this.currentAccount };
+  }
+
+  async resetAccount(initialBalance: number, clearJournal: boolean = false): Promise<void> {
+    return this.handleResetBalance(initialBalance, clearJournal);
+  }
+
+  applyRealizedPnl(pnl: number): void {
+    const isDemo = this.isDemoMode();
+    let newBal = Math.round((this.currentAccount.balance + pnl) * 100) / 100;
+    if (newBal < 0 && this.currentPositions.length === 0) {
+      newBal = 0.0;
+    }
+    this.currentAccount.balance = newBal;
+    this.currentAccount.equity = Math.round((newBal + this.currentAccount.unrealized_pnl) * 100) / 100;
+    this.currentAccount.free_margin = Math.round((this.currentAccount.equity - this.currentAccount.margin_used) * 100) / 100;
+    if (isDemo && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('demo_account_balance', String(newBal));
+    }
+    this.updateMetrics(this.currentAccount, this.currentPositions.length, 0);
+    this.renderAccountCards(this.currentAccount);
+    this.onAccountSummaryUpdated?.(this.currentAccount);
+  }
+
   setInMemoryPositions(positions: PositionDefinition[]): void {
     this.currentPositions = positions;
     const totalLots = positions.reduce((sum, p) => sum + (p.quantity || 0), 0);
     const totalUnrealized = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-    const curBal = this.currentAccount.balance || 10000;
+    const totalMarginUsed = positions.reduce((sum, p) => sum + (p.required_margin || 0), 0);
+    const curBal = this.isDemoMode() && typeof sessionStorage !== 'undefined'
+      ? (parseFloat(sessionStorage.getItem('demo_account_balance') || '') || this.currentAccount.balance || 10000)
+      : (this.currentAccount.balance || 10000);
     const curEquity = curBal + totalUnrealized;
+    const freeMargin = curEquity - totalMarginUsed;
+    const marginLevel = totalMarginUsed > 0 ? (curEquity / totalMarginUsed) * 100 : 0;
 
     this.currentAccount = {
       ...this.currentAccount,
       balance: curBal,
       equity: curEquity,
       unrealized_pnl: totalUnrealized,
-      free_margin: curEquity,
+      margin_used: totalMarginUsed,
+      free_margin: freeMargin,
+      margin_level: Math.round(marginLevel * 10) / 10,
     };
 
     this.updateMetrics(this.currentAccount, positions.length, totalLots);
@@ -533,6 +597,7 @@ export class TradingDrawer {
     if (this.activeTab === 'positions') {
       this.renderPositions(positions);
     }
+    this.renderAccountCards(this.currentAccount);
     this.updateBadges();
     this.updateBulkButton();
   }
@@ -541,12 +606,18 @@ export class TradingDrawer {
     if (!this.bridge) return;
 
     try {
-      const isDemo = this.authState ? this.authState.isDemo() : false;
+      if (typeof this.bridge.connect === 'function') {
+        const isConnected = await this.bridge.connect();
+        if (!isConnected) return;
+      }
+
+      const isDemo = this.isDemoMode();
+      const token = this.authState?.getToken();
 
       // 1. Fetch Open Positions
       const posRes = await this.bridge.callJson<{ ok: boolean; data?: PositionDefinition[] }>(
         'getOpenPositions',
-        { is_demo: isDemo },
+        { is_demo: isDemo, token: token || undefined },
       );
       const positions = posRes.ok && Array.isArray(posRes.data) ? posRes.data : [];
       this.currentPositions = positions;
@@ -557,7 +628,7 @@ export class TradingDrawer {
       // 2. Fetch Pending Orders (for accurate badge count)
       const ordRes = await this.bridge.callJson<{ ok: boolean; data?: any[] }>(
         'getPendingOrders',
-        {},
+        { is_demo: isDemo, token: token || undefined },
       );
       const orders = ordRes.ok && Array.isArray(ordRes.data) ? ordRes.data : [];
       this.currentOrders = orders;
@@ -565,17 +636,32 @@ export class TradingDrawer {
       // 3. Fetch Account Summary
       const accRes = await this.bridge.callJson<{ ok: boolean; data?: AccountSummary }>(
         'getAccountSummary',
-        { is_demo: isDemo },
+        { is_demo: isDemo, token: token || undefined },
       );
-      if (accRes.ok && accRes.data) {
+      if (accRes.ok && accRes.data && typeof accRes.data.balance === 'number') {
         const acc = accRes.data;
         this.currentAccount = acc;
+        if (isDemo && typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('demo_account_balance', String(acc.balance));
+        }
         if (this.onAccountSummaryUpdated) {
           this.onAccountSummaryUpdated(acc);
         }
         const totalLots = positions.reduce((sum, p) => sum + (p.quantity || 0), 0);
         this.updateMetrics(acc, positions.length, totalLots);
         this.renderAccountCards(acc);
+      } else if (isDemo && typeof sessionStorage !== 'undefined') {
+        const saved = sessionStorage.getItem('demo_account_balance');
+        if (saved) {
+          const bal = parseFloat(saved);
+          if (!isNaN(bal) && bal > 0) {
+            this.currentAccount.balance = bal;
+            this.currentAccount.equity = bal + this.currentAccount.unrealized_pnl;
+            this.currentAccount.free_margin = this.currentAccount.equity - this.currentAccount.margin_used;
+            this.updateMetrics(this.currentAccount, positions.length, 0);
+            this.renderAccountCards(this.currentAccount);
+          }
+        }
       }
 
       // 4. Render active tab
@@ -717,14 +803,26 @@ export class TradingDrawer {
       this.onAccountSummaryUpdated(this.currentAccount);
     }
 
+    const isDemo = this.isDemoMode();
+    const token = this.authState?.getToken();
+
+    if (isDemo && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('demo_account_balance', String(this.currentAccount.balance));
+    }
+
     if (!this.bridge) {
       this.onToast?.(`💰 Added $${amount.toLocaleString()} to paper balance`);
       return;
     }
 
     try {
-      const isDemo = this.authState ? this.authState.isDemo() : false;
-      const token = this.authState?.getToken();
+      if (typeof this.bridge.connect === 'function') {
+        const isConnected = await this.bridge.connect();
+        if (!isConnected) {
+          this.onToast?.(`💰 Added $${amount.toLocaleString()} to paper balance`);
+          return;
+        }
+      }
 
       if (token && !isDemo) {
         const res = await this.bridge.callJson<{ ok: boolean; data?: { balance: number } }>(
@@ -748,6 +846,7 @@ export class TradingDrawer {
             amount,
             note,
             is_demo: isDemo,
+            token: token || undefined,
           },
         );
         if (res?.ok && res.data?.balance !== undefined) {
@@ -755,11 +854,14 @@ export class TradingDrawer {
             ...this.currentAccount,
             ...res.data,
           };
+          if (isDemo && typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('demo_account_balance', String(res.data.balance));
+          }
           this.updateMetrics(this.currentAccount, this.currentPositions.length, 0);
           this.renderAccountCards(this.currentAccount);
           this.onAccountSummaryUpdated?.(this.currentAccount);
         }
-        this.onToast?.(`💰 Added $${amount.toLocaleString()} to demo balance`);
+        this.onToast?.(`💰 Added $${amount.toLocaleString()} to ${isDemo ? 'demo' : 'paper'} balance`);
       }
       await this.refresh();
     } catch (err: any) {
@@ -779,14 +881,26 @@ export class TradingDrawer {
     this.renderAccountCards(this.currentAccount);
     this.onAccountSummaryUpdated?.(this.currentAccount);
 
+    const isDemo = this.isDemoMode();
+    const token = this.authState?.getToken();
+
+    if (isDemo && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('demo_account_balance', String(initialBalance));
+    }
+
     if (!this.bridge) {
       this.onToast?.(`🔄 Paper balance reset to $${initialBalance.toLocaleString()}`);
       return;
     }
 
     try {
-      const isDemo = this.authState ? this.authState.isDemo() : false;
-      const token = this.authState?.getToken();
+      if (typeof this.bridge.connect === 'function') {
+        const isConnected = await this.bridge.connect();
+        if (!isConnected) {
+          this.onToast?.(`🔄 Paper balance reset to $${initialBalance.toLocaleString()}`);
+          return;
+        }
+      }
 
       if (token && !isDemo) {
         const res = await this.bridge.callJson<{ ok: boolean; data?: { balance: number } }>(
@@ -808,17 +922,21 @@ export class TradingDrawer {
           initial_balance: initialBalance,
           clear_journal: clearJournal,
           is_demo: isDemo,
+          token: token || undefined,
         });
         if (res?.ok && res.data?.balance !== undefined) {
           this.currentAccount = {
             ...this.currentAccount,
             ...res.data,
           };
+          if (isDemo && typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('demo_account_balance', String(res.data.balance));
+          }
           this.updateMetrics(this.currentAccount, 0, 0);
           this.renderAccountCards(this.currentAccount);
           this.onAccountSummaryUpdated?.(this.currentAccount);
         }
-        this.onToast?.(`🔄 Demo balance reset to $${initialBalance.toLocaleString()}`);
+        this.onToast?.(`🔄 ${isDemo ? 'Demo' : 'Paper'} balance reset to $${initialBalance.toLocaleString()}`);
       }
       await this.refresh();
     } catch (err: any) {
@@ -988,7 +1106,7 @@ export class TradingDrawer {
   private renderJournal(records: TradeRecord[]): void {
     const bannerWrap = this.container.querySelector('#journal-banner-wrap');
     if (bannerWrap) {
-      if (this.authState?.isDemo()) {
+      if (this.isDemoMode()) {
         bannerWrap.innerHTML = `
           <div class="demo-journal-warning-banner">
             <div class="warning-banner-text">
@@ -1101,6 +1219,7 @@ export class TradingDrawer {
     const pnlColor = unrealizedPnl > 0 ? '#089981' : unrealizedPnl < 0 ? '#f23645' : '#ffffff';
     const realizedColor = realizedPnl > 0 ? '#089981' : realizedPnl < 0 ? '#f23645' : '#ffffff';
     const marginLevel = marginUsed > 0 ? (equity / marginUsed) * 100 : 0;
+    const marginLevelColor = marginLevel > 0 && marginLevel <= 30 ? '#f23645' : marginLevel > 0 && marginLevel <= 100 ? '#f59e0b' : '#ffffff';
     const totalTrades = acc.total_trades ?? this.currentJournal.length;
     const winRate = acc.win_rate ?? 0;
     const marginUsedPct = equity > 0 ? Math.min(100, Math.max(0, (marginUsed / equity) * 100)) : 0;
@@ -1134,7 +1253,7 @@ export class TradingDrawer {
       </div>
       <div class="account-card">
         <span class="account-card-label">Margin Level</span>
-        <span class="account-card-val">${marginLevel > 0 ? `${marginLevel.toFixed(1)}%` : '∞'}</span>
+        <span class="account-card-val" style="color: ${marginLevelColor}">${marginLevel > 0 ? `${marginLevel.toFixed(1)}%` : '∞'}</span>
       </div>
       <div class="account-card">
         <span class="account-card-label">Win Rate (${totalTrades} Trd)</span>

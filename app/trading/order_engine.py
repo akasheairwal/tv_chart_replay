@@ -1,6 +1,7 @@
 """
-Order Engine — paper trading order execution & risk manager (Architecture §70–71).
-Supports multi-user scoping and ephemeral (zero DB write) demo paper trading.
+Order Engine — paper trading order execution & risk manager (Architecture §70–71 / ADR 0011).
+Supports multi-user scoping, ephemeral demo paper trading, real-time margin accounting,
+and institutional force liquidation (stop-out) with negative balance protection.
 """
 
 from __future__ import annotations
@@ -16,7 +17,9 @@ from app.trading.models import (
     AccountSummary,
     Order,
     Position,
+    calculate_required_margin,
     get_contract_multiplier,
+    get_default_leverage,
     get_pip_size,
 )
 
@@ -59,6 +62,7 @@ class OrderEngine:
     ):
         self.journal = journal
         self.account = AccountSummary(balance=initial_balance, equity=initial_balance, free_margin=initial_balance)
+        self._demo_account = AccountSummary(balance=initial_balance, equity=initial_balance, free_margin=initial_balance)
         self.commission_per_trade = commission_per_trade
         self.emit = emit
         self.orders: dict[str, Order] = {}
@@ -67,6 +71,20 @@ class OrderEngine:
         self._latest_prices: dict[str, float] = {}
         self._current_replay_timestamp: float = 0.0
         self._lock = threading.Lock()
+
+    def _recalculate_account_metrics(self) -> None:
+        """Recalculate margin_used, unrealized_pnl, equity, free_margin, and margin_level for both accounts."""
+        # 1. Live account
+        live_open = [p for p in self.positions.values() if p.status == "OPEN" and not p.is_demo]
+        self.account.margin_used = round(sum(p.required_margin for p in live_open), 2)
+        self.account.unrealized_pnl = round(sum(p.unrealized_pnl for p in live_open), 2)
+        self.account.update_totals()
+
+        # 2. Demo account
+        demo_open = [p for p in self.positions.values() if p.status == "OPEN" and p.is_demo]
+        self._demo_account.margin_used = round(sum(p.required_margin for p in demo_open), 2)
+        self._demo_account.unrealized_pnl = round(sum(p.unrealized_pnl for p in demo_open), 2)
+        self._demo_account.update_totals()
 
     def reset_account(
         self,
@@ -77,29 +95,65 @@ class OrderEngine:
     ) -> AccountSummary:
         with self._lock:
             init_bal = float(initial_balance)
-            prev_trades = self.account.total_trades if not clear_journal else 0
-            prev_winning = self.account.winning_trades if not clear_journal else 0
-            prev_losing = self.account.losing_trades if not clear_journal else 0
-            prev_realized = self.account.realized_pnl if not clear_journal else 0.0
-            self.account = AccountSummary(
-                balance=init_bal,
-                equity=init_bal,
-                free_margin=init_bal,
-                total_trades=prev_trades,
-                winning_trades=prev_winning,
-                losing_trades=prev_losing,
-                realized_pnl=prev_realized,
-            )
             if is_demo:
+                prev_trades = self._demo_account.total_trades if not clear_journal else 0
+                prev_winning = self._demo_account.winning_trades if not clear_journal else 0
+                prev_losing = self._demo_account.losing_trades if not clear_journal else 0
+                prev_realized = self._demo_account.realized_pnl if not clear_journal else 0.0
+                self._demo_account = AccountSummary(
+                    balance=init_bal,
+                    equity=init_bal,
+                    free_margin=init_bal,
+                    margin_used=0.0,
+                    margin_level=0.0,
+                    total_trades=prev_trades,
+                    winning_trades=prev_winning,
+                    losing_trades=prev_losing,
+                    realized_pnl=prev_realized,
+                )
                 self.orders = {k: v for k, v in self.orders.items() if not v.is_demo}
                 self.positions = {k: v for k, v in self.positions.items() if not v.is_demo}
                 self._demo_trades.clear()
+                self._recalculate_account_metrics()
+                res = self._demo_account
             elif user_id is not None:
+                prev_trades = self.account.total_trades if not clear_journal else 0
+                prev_winning = self.account.winning_trades if not clear_journal else 0
+                prev_losing = self.account.losing_trades if not clear_journal else 0
+                prev_realized = self.account.realized_pnl if not clear_journal else 0.0
+                self.account = AccountSummary(
+                    balance=init_bal,
+                    equity=init_bal,
+                    free_margin=init_bal,
+                    margin_used=0.0,
+                    margin_level=0.0,
+                    total_trades=prev_trades,
+                    winning_trades=prev_winning,
+                    losing_trades=prev_losing,
+                    realized_pnl=prev_realized,
+                )
                 self.orders = {k: v for k, v in self.orders.items() if v.user_id != user_id}
                 self.positions = {k: v for k, v in self.positions.items() if v.user_id != user_id}
                 if clear_journal:
                     self.journal.clear(user_id=user_id)
+                self._recalculate_account_metrics()
+                res = self.account
             else:
+                prev_trades = self.account.total_trades if not clear_journal else 0
+                prev_winning = self.account.winning_trades if not clear_journal else 0
+                prev_losing = self.account.losing_trades if not clear_journal else 0
+                prev_realized = self.account.realized_pnl if not clear_journal else 0.0
+                self.account = AccountSummary(
+                    balance=init_bal,
+                    equity=init_bal,
+                    free_margin=init_bal,
+                    margin_used=0.0,
+                    margin_level=0.0,
+                    total_trades=prev_trades,
+                    winning_trades=prev_winning,
+                    losing_trades=prev_losing,
+                    realized_pnl=prev_realized,
+                )
                 self.orders.clear()
                 self.positions.clear()
                 self._demo_trades.clear()
@@ -107,11 +161,12 @@ class OrderEngine:
                 self._current_replay_timestamp = 0.0
                 if clear_journal:
                     self.journal.clear()
-            res = self.account
+                self._recalculate_account_metrics()
+                res = self.account
 
         if self.emit:
-            self.emit("trading.account", self.get_account_summary())
-            self.emit("trading.positions", self.get_open_positions())
+            self.emit("trading.account", self.get_account_summary(is_demo=is_demo))
+            self.emit("trading.positions", self.get_open_positions(is_demo=is_demo))
         return res
 
     def add_balance(
@@ -126,14 +181,17 @@ class OrderEngine:
             amount_float = float(amount)
             if amount_float <= 0:
                 raise ValueError("Deposit amount must be positive")
-            self.account.balance = round(self.account.balance + amount_float, 2)
-            total_unrealized = sum(p.unrealized_pnl for p in self.positions.values() if p.status == "OPEN")
-            self.account.unrealized_pnl = total_unrealized
-            self.account.update_totals()
-            res = self.account
+            if is_demo:
+                self._demo_account.balance = round(self._demo_account.balance + amount_float, 2)
+                self._recalculate_account_metrics()
+                res = self._demo_account
+            else:
+                self.account.balance = round(self.account.balance + amount_float, 2)
+                self._recalculate_account_metrics()
+                res = self.account
 
         if self.emit:
-            self.emit("trading.account", self.get_account_summary())
+            self.emit("trading.account", self.get_account_summary(is_demo=is_demo))
         return res
 
     def place_order(
@@ -150,6 +208,8 @@ class OrderEngine:
         timestamp: float = 0.0,
         user_id: str = "local_default",
         is_demo: bool = False,
+        leverage: float | None = None,
+        enforce_margin: bool = False,
     ) -> Order:
         order_id = f"ord_{uuid.uuid4().hex[:8]}"
         side_clean = side.upper()
@@ -163,6 +223,31 @@ class OrderEngine:
         clean_tp = _resolve_target_price(take_profit, exec_price, pip_size, side_clean, is_take_profit=True)
 
         exec_timestamp = timestamp if timestamp > 0 else (self._current_replay_timestamp if self._current_replay_timestamp > 0 else time.time())
+        eff_leverage = leverage if (leverage is not None and leverage > 0) else get_default_leverage(sym_clean)
+        req_margin = calculate_required_margin(sym_clean, quantity, exec_price if exec_price > 0 else price, eff_leverage)
+
+        target_account = self._demo_account if is_demo else self.account
+
+        # Pre-trade margin check if explicitly requested
+        if enforce_margin and target_account.free_margin < req_margin:
+            order = Order(
+                order_id=order_id,
+                symbol=sym_clean,
+                side=side_clean,
+                order_type=type_clean,
+                quantity=quantity,
+                price=price if type_clean in ("LIMIT", "STOP") else exec_price,
+                stop_loss=clean_sl,
+                take_profit=clean_tp,
+                trailing_stop_pips=trailing_stop_pips,
+                status="REJECTED",
+                created_at=exec_timestamp,
+                user_id=user_id,
+                is_demo=is_demo,
+                leverage=eff_leverage,
+                required_margin=req_margin,
+            )
+            return order
 
         order = Order(
             order_id=order_id,
@@ -178,6 +263,8 @@ class OrderEngine:
             created_at=exec_timestamp,
             user_id=user_id,
             is_demo=is_demo,
+            leverage=eff_leverage,
+            required_margin=req_margin,
         )
 
         with self._lock:
@@ -186,9 +273,9 @@ class OrderEngine:
                 self._execute_order(order, exec_price, exec_timestamp)
 
         if self.emit:
-            self.emit("trading.account", self.get_account_summary())
-            self.emit("trading.positions", self.get_open_positions())
-            self.emit("trading.orders", self.get_pending_orders())
+            self.emit("trading.account", self.get_account_summary(is_demo=is_demo))
+            self.emit("trading.positions", self.get_open_positions(is_demo=is_demo))
+            self.emit("trading.orders", self.get_pending_orders(is_demo=is_demo))
 
         return order
 
@@ -198,11 +285,13 @@ class OrderEngine:
             if order and order.status == "PENDING":
                 order.status = "CANCELLED"
                 cancelled = True
+                is_demo = order.is_demo
             else:
                 cancelled = False
+                is_demo = False
 
         if cancelled and self.emit:
-            self.emit("trading.orders", self.get_pending_orders())
+            self.emit("trading.orders", self.get_pending_orders(is_demo=is_demo))
         return cancelled
 
     def close_position(
@@ -218,11 +307,12 @@ class OrderEngine:
                 return None
 
             exec_price = current_price if current_price > 0 else self._latest_prices.get(pos.symbol, pos.entry_price)
+            is_demo = pos.is_demo
             record = self._close_position_internal(pos, exec_price, reason, close_quantity)
 
         if self.emit:
-            self.emit("trading.account", self.get_account_summary())
-            self.emit("trading.positions", self.get_open_positions())
+            self.emit("trading.account", self.get_account_summary(is_demo=is_demo))
+            self.emit("trading.positions", self.get_open_positions(is_demo=is_demo))
             self.emit("trading.position_closed", record)
 
         return record
@@ -249,15 +339,24 @@ class OrderEngine:
                 pos.take_profit = _resolve_target_price(take_profit, exec_price, pip_size, side_clean, is_take_profit=True)
 
             res = pos.to_dict()
+            is_demo = pos.is_demo
 
         if self.emit:
-            self.emit("trading.account", self.get_account_summary())
-            self.emit("trading.positions", self.get_open_positions())
+            self.emit("trading.account", self.get_account_summary(is_demo=is_demo))
+            self.emit("trading.positions", self.get_open_positions(is_demo=is_demo))
             self.emit("trading.position_updated", res)
 
         return res
 
-    def on_replay_tick(self, symbol: str, open_p: float, high_p: float, low_p: float, close_p: float, timestamp: float = 0.0) -> list[dict[str, Any]]:
+    def on_replay_tick(
+        self,
+        symbol: str,
+        open_p: float,
+        high_p: float,
+        low_p: float,
+        close_p: float,
+        timestamp: float = 0.0,
+    ) -> list[dict[str, Any]]:
         """Evaluate pending orders and open positions against replay candle high/low/close prices."""
         events = []
         with self._lock:
@@ -322,21 +421,118 @@ class OrderEngine:
                         events.append({"event": "position_closed", "reason": "TAKE_PROFIT", "trade": record})
                         continue
 
-            # Update account unrealized PnL summary
-            total_unrealized = sum(p.unrealized_pnl for p in self.positions.values() if p.status == "OPEN")
-            self.account.unrealized_pnl = total_unrealized
-            self.account.update_totals()
+            # 3. Recalculate metrics for both accounts
+            self._recalculate_account_metrics()
+
+            # 4. Check Institutional Stop-Out / Force Liquidation (ADR 0011)
+            self._check_force_liquidation(
+                is_demo=False,
+                close_p=close_p,
+                high_p=high_p,
+                low_p=low_p,
+                timestamp=timestamp,
+                events=events,
+            )
+            self._check_force_liquidation(
+                is_demo=True,
+                close_p=close_p,
+                high_p=high_p,
+                low_p=low_p,
+                timestamp=timestamp,
+                events=events,
+            )
 
         if self.emit:
-            self.emit("trading.account", self.get_account_summary())
-            self.emit("trading.positions", self.get_open_positions())
+            self.emit("trading.account", self.get_account_summary(is_demo=False))
+            self.emit("trading.positions", self.get_open_positions(is_demo=False))
             for ev in events:
                 if ev.get("event") == "position_closed":
                     self.emit("trading.position_closed", ev.get("trade"))
                 elif ev.get("event") == "order_filled":
                     self.emit("trading.order_filled", ev.get("order"))
+                elif ev.get("event") == "liquidation":
+                    self.emit("trading.liquidation", ev)
 
         return events
+
+    def _check_force_liquidation(
+        self,
+        is_demo: bool,
+        close_p: float,
+        high_p: float,
+        low_p: float,
+        timestamp: float,
+        events: list[dict[str, Any]],
+    ) -> None:
+        """Check Stop-Out threshold (Margin Level <= 30% or Equity <= 0) and execute liquidation."""
+        target_account = self._demo_account if is_demo else self.account
+        open_positions = [p for p in self.positions.values() if p.status == "OPEN" and p.is_demo == is_demo]
+        if not open_positions:
+            return
+
+        is_stop_out = (target_account.margin_used > 0 and target_account.margin_level <= 30.0) or target_account.equity <= 0.0
+
+        if not is_stop_out:
+            if target_account.margin_used > 0 and target_account.margin_level <= 100.0:
+                events.append({
+                    "event": "margin_call_warning",
+                    "is_demo": is_demo,
+                    "margin_level": target_account.margin_level,
+                    "equity": target_account.equity,
+                    "margin_used": target_account.margin_used,
+                })
+            return
+
+        # Sort open positions by largest floating loss ascending (most negative first)
+        sorted_positions = sorted(open_positions, key=lambda p: p.unrealized_pnl)
+        liquidated_records = []
+
+        for pos in sorted_positions:
+            adverse_price = (low_p if pos.side == "LONG" else high_p) if close_p > 0 else pos.current_price
+            if adverse_price <= 0:
+                adverse_price = close_p if close_p > 0 else pos.current_price
+
+            record = self._close_position_internal(pos, adverse_price, reason="FORCE_LIQUIDATION")
+            liquidated_records.append(record)
+            events.append({
+                "event": "position_closed",
+                "reason": "FORCE_LIQUIDATION",
+                "trade": record,
+            })
+
+            self._recalculate_account_metrics()
+
+            # If margin level recovered above 30% and equity > 0, stop liquidation
+            if target_account.margin_used == 0 or (target_account.margin_level > 30.0 and target_account.equity > 0):
+                break
+
+        # Cancel all pending orders for this account
+        for ord_id, ord_obj in list(self.orders.items()):
+            if ord_obj.is_demo == is_demo and ord_obj.status == "PENDING":
+                ord_obj.status = "CANCELLED"
+                events.append({
+                    "event": "order_cancelled",
+                    "reason": "LIQUIDATION_CANCEL",
+                    "order": ord_obj.to_dict(),
+                })
+
+        # Negative Balance Protection: clamp negative balance to 0.00
+        if target_account.balance < 0.0:
+            target_account.balance = 0.0
+            self._recalculate_account_metrics()
+
+        liq_event = {
+            "event": "liquidation",
+            "is_demo": is_demo,
+            "reason": "STOP_OUT_30_PERCENT",
+            "liquidated_positions": liquidated_records,
+            "final_balance": target_account.balance,
+            "final_equity": target_account.equity,
+            "timestamp": timestamp or time.time(),
+        }
+        events.append(liq_event)
+        if self.emit:
+            self.emit("trading.liquidation", liq_event)
 
     def _execute_order(self, order: Order, fill_price: float, timestamp: float = 0.0) -> None:
         order.status = "FILLED"
@@ -346,6 +542,7 @@ class OrderEngine:
         # Open Position
         pos_id = f"pos_{uuid.uuid4().hex[:8]}"
         pos_side = "LONG" if order.side == "BUY" else "SHORT"
+        req_margin = calculate_required_margin(order.symbol, order.quantity, fill_price, order.leverage)
         pos = Position(
             position_id=pos_id,
             symbol=order.symbol,
@@ -361,8 +558,11 @@ class OrderEngine:
             opened_at=timestamp if timestamp > 0 else (self._current_replay_timestamp if self._current_replay_timestamp > 0 else time.time()),
             user_id=order.user_id,
             is_demo=order.is_demo,
+            leverage=order.leverage,
+            required_margin=req_margin,
         )
         self.positions[pos_id] = pos
+        self._recalculate_account_metrics()
 
     def _close_position_internal(
         self,
@@ -389,6 +589,7 @@ class OrderEngine:
         if is_partial:
             pos.quantity = round(pos.quantity - qty_to_close, 2)
             pos.current_price = close_price
+            pos.required_margin = calculate_required_margin(pos.symbol, pos.quantity, pos.entry_price, pos.leverage)
             exit_rsn = f"PARTIAL_CLOSE ({reason})"
         else:
             pos.status = "CLOSED"
@@ -396,18 +597,30 @@ class OrderEngine:
             pos.current_price = close_price
             pos.realized_pnl = pnl
             pos.unrealized_pnl = 0.0
+            pos.required_margin = 0.0
             exit_rsn = reason
 
         # Update account stats
-        self.account.balance += pnl
-        self.account.realized_pnl += pnl
-        self.account.total_trades += 1
+        target_account = self._demo_account if pos.is_demo else self.account
+        target_account.balance += pnl
+        target_account.realized_pnl += pnl
+        target_account.total_trades += 1
         if pnl > 0:
-            self.account.winning_trades += 1
+            target_account.winning_trades += 1
         elif pnl < 0:
-            self.account.losing_trades += 1
+            target_account.losing_trades += 1
 
-        self.account.update_totals()
+        if not is_partial:
+            self.positions.pop(pos.position_id, None)
+
+        # Recalculate margin and equity totals
+        self._recalculate_account_metrics()
+
+        # Negative Balance Protection if all positions are closed and balance is negative
+        open_count = len([p for p in self.positions.values() if p.status == "OPEN" and p.is_demo == pos.is_demo])
+        if open_count == 0 and target_account.balance < 0.0:
+            target_account.balance = 0.0
+            self._recalculate_account_metrics()
 
         trade_id = f"{pos.position_id}_partial_{int(time.time()*1000)}" if is_partial else pos.position_id
 
@@ -449,9 +662,6 @@ class OrderEngine:
                 user_id=pos.user_id,
             )
 
-        if not is_partial:
-            self.positions.pop(pos.position_id, None)
-
         return record
 
     def get_open_positions(
@@ -491,8 +701,8 @@ class OrderEngine:
                 return list(reversed(self._demo_trades))[:limit]
             return self.journal.get_trades(limit=limit, user_id=user_id)
 
-    def get_account_summary(self) -> dict[str, Any]:
+    def get_account_summary(self, is_demo: bool = False) -> dict[str, Any]:
         with self._lock:
-            total_unrealized = sum(p.unrealized_pnl for p in self.positions.values() if p.status == "OPEN")
-            self.account.unrealized_pnl = total_unrealized
-            return self.account.to_dict()
+            self._recalculate_account_metrics()
+            target_account = self._demo_account if is_demo else self.account
+            return target_account.to_dict()

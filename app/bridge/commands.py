@@ -623,6 +623,9 @@ class BridgeCommandHandler(QObject):
             tp_raw = data.get("take_profit")
             clean_tp = float(tp_raw) if tp_raw is not None and str(tp_raw).strip() and float(tp_raw) > 0 else None
 
+            lev_raw = data.get("leverage")
+            clean_lev = float(lev_raw) if lev_raw is not None and float(lev_raw) > 0 else None
+
             order = self._services.order_engine.place_order(
                 symbol=data.get("symbol", ""),
                 side=data.get("side", "BUY"),
@@ -636,6 +639,7 @@ class BridgeCommandHandler(QObject):
                 timestamp=float(data.get("timestamp", 0.0)),
                 user_id=str(data.get("user_id", "local_default")),
                 is_demo=bool(data.get("is_demo", False)),
+                leverage=clean_lev,
             )
             return order.to_dict()
 
@@ -711,23 +715,25 @@ class BridgeCommandHandler(QObject):
             if self._services is None or not hasattr(self._services, "order_engine"):
                 return {}
             user_id = None
+            is_demo = False
             if payload_json and payload_json.startswith("{"):
                 try:
                     data = json.loads(payload_json)
                     user_id = data.get("user_id")
+                    is_demo = bool(data.get("is_demo", False))
                     if not user_id and data.get("token") and hasattr(self._services, "auth_service"):
                         u = self._services.auth_service.authenticate_token(data["token"])
                         if u:
                             user_id = u.id
                 except Exception:
                     pass
-            if user_id and hasattr(self._services, "user_repo"):
+            if user_id and not is_demo and hasattr(self._services, "user_repo"):
                 u = self._services.user_repo.get_by_id(user_id)
                 if u and hasattr(self._services, "order_engine"):
                     self._services.order_engine.account.balance = u.balance
                     self._services.order_engine.account.update_totals()
 
-            return self._services.order_engine.get_account_summary()
+            return self._services.order_engine.get_account_summary(is_demo=is_demo)
 
         return self._envelope(action)
 
@@ -817,6 +823,10 @@ class BridgeCommandHandler(QObject):
                     elif isinstance(parsed, dict):
                         balance = float(parsed.get("initial_balance", 10000.0))
                         user_id = parsed.get("user_id")
+                        if not user_id and parsed.get("token") and hasattr(self._services, "auth_service"):
+                            u = self._services.auth_service.authenticate_token(parsed["token"])
+                            if u:
+                                user_id = u.id
                         is_demo = bool(parsed.get("is_demo", False))
                         clear_journal = bool(parsed.get("clear_journal", False))
                 except (ValueError, TypeError, json.JSONDecodeError):
@@ -824,6 +834,11 @@ class BridgeCommandHandler(QObject):
             summary = self._services.order_engine.reset_account(
                 balance, user_id=user_id, is_demo=is_demo, clear_journal=clear_journal
             )
+            if user_id and not is_demo and hasattr(self._services, "auth_service"):
+                try:
+                    self._services.auth_service.reset_account(user_id, balance)
+                except Exception:
+                    pass
             return summary.to_dict()
 
         return self._envelope(action)
@@ -849,6 +864,10 @@ class BridgeCommandHandler(QObject):
                     elif isinstance(parsed, dict):
                         amount = float(parsed.get("amount", 1000.0))
                         user_id = parsed.get("user_id")
+                        if not user_id and parsed.get("token") and hasattr(self._services, "auth_service"):
+                            u = self._services.auth_service.authenticate_token(parsed["token"])
+                            if u:
+                                user_id = u.id
                         is_demo = bool(parsed.get("is_demo", False))
                         note = str(parsed.get("note", ""))
                 except (ValueError, TypeError, json.JSONDecodeError):
@@ -856,9 +875,11 @@ class BridgeCommandHandler(QObject):
             summary = self._services.order_engine.add_balance(
                 amount, user_id=user_id, is_demo=is_demo, note=note
             )
-            if user_id and hasattr(self._services, "auth_service"):
+            if user_id and not is_demo and hasattr(self._services, "auth_service"):
                 try:
-                    self._services.auth_service.add_balance(user_id, amount)
+                    new_user_bal = self._services.auth_service.add_balance(user_id, amount)
+                    self._services.order_engine.account.balance = new_user_bal
+                    self._services.order_engine.account.update_totals()
                 except Exception:
                     pass
             return summary.to_dict()
@@ -879,6 +900,10 @@ class BridgeCommandHandler(QObject):
                 password=data.get("password", ""),
                 initial_balance=float(data.get("initial_balance", 10000.0)),
             )
+            if hasattr(self._services, "order_engine"):
+                self._services.order_engine.reset_account(
+                    user.balance, user_id=user.id, is_demo=False
+                )
             return {"user": user.to_dict(), "token": session.token}
 
         return self._envelope(action)
@@ -893,6 +918,9 @@ class BridgeCommandHandler(QObject):
                 login=data.get("login") or data.get("username") or data.get("email") or "",
                 password=data.get("password", ""),
             )
+            if hasattr(self._services, "order_engine"):
+                self._services.order_engine.account.balance = user.balance
+                self._services.order_engine.account.update_totals()
             return {"user": user.to_dict(), "token": session.token}
 
         return self._envelope(action)
@@ -925,6 +953,9 @@ class BridgeCommandHandler(QObject):
             user = self._services.auth_service.authenticate_token(tok)
             if user is None:
                 raise ValueError("Unauthorized or session expired")
+            if hasattr(self._services, "order_engine"):
+                self._services.order_engine.account.balance = user.balance
+                self._services.order_engine.account.update_totals()
             return {"user": user.to_dict()}
 
         return self._envelope(action)
@@ -984,6 +1015,8 @@ class BridgeCommandHandler(QObject):
                 self._services.order_engine.add_balance(
                     amount, user_id=user.id, is_demo=False, note=note
                 )
+                self._services.order_engine.account.balance = new_bal
+                self._services.order_engine.account.update_totals()
             return {"balance": new_bal}
 
         return self._envelope(action)

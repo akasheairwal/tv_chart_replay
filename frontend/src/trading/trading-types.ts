@@ -1,5 +1,5 @@
 /**
- * Trade Simulation TypeScript interfaces (Architecture §70–71).
+ * Trade Simulation TypeScript interfaces (Architecture §70–71 / ADR 0011).
  */
 
 export interface OrderDefinition {
@@ -18,6 +18,8 @@ export interface OrderDefinition {
   created_at?: number;
   filled_at?: number;
   filled_price?: number;
+  leverage?: number;
+  required_margin?: number;
 }
 
 export interface PositionDefinition {
@@ -37,6 +39,8 @@ export interface PositionDefinition {
   opened_at: number;
   closed_at?: number;
   status: 'OPEN' | 'CLOSED';
+  leverage?: number;
+  required_margin?: number;
 }
 
 export interface AccountSummary {
@@ -44,6 +48,7 @@ export interface AccountSummary {
   equity: number;
   margin_used: number;
   free_margin: number;
+  margin_level?: number;
   unrealized_pnl: number;
   realized_pnl: number;
   total_trades: number;
@@ -68,9 +73,18 @@ export interface TradeRecord {
   exit_reason: string;
 }
 
-export type RiskUnit = 'CURRENCY' | 'PERCENT';
-export type SlInputMode = 'PRICE' | 'PIPS' | 'CURRENCY' | 'PERCENT';
-export type TpInputMode = 'PRICE' | 'PIPS' | 'CURRENCY' | 'RR';
+export interface TradingState {
+  account: AccountSummary;
+  positions: PositionDefinition[];
+  orders: OrderDefinition[];
+  trades: TradeRecord[];
+}
+
+export type RiskUnit = 'PERCENT' | 'CURRENCY';
+export type SlMode = 'PRICE' | 'PIPS' | 'PERCENT' | 'CURRENCY';
+export type TpMode = 'PRICE' | 'PIPS' | 'RR' | 'CURRENCY';
+export type SlInputMode = SlMode;
+export type TpInputMode = TpMode;
 
 export interface RiskCalculationParams {
   symbol: string;
@@ -79,9 +93,9 @@ export interface RiskCalculationParams {
   accountEquity: number;
   riskUnit: RiskUnit;
   riskValue: number;
-  slMode: SlInputMode;
+  slMode: SlMode;
   slValue: number;
-  tpMode: TpInputMode;
+  tpMode: TpMode;
   tpValue: number;
   leverage: number;
 }
@@ -105,4 +119,3 @@ export interface RiskCalculationResult {
   isValid: boolean;
   errorMessage?: string;
 }
-
